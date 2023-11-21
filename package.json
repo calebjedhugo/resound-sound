@@ -1,0 +1,25 @@
+{
+  "name": "resound-sound",
+  "version": "1.0.0",
+  "description": "A web audio sound library",
+  "main": "index.js",
+  "scripts": {
+    "test": "test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/calebjedhugo/resound-sound.git"
+  },
+  "keywords": [
+    "web",
+    "audio",
+    "sound",
+    "library"
+  ],
+  "author": "Caleb Hugo",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/calebjedhugo/resound-sound/issues"
+  },
+  "homepage": "https://github.com/calebjedhugo/resound-sound#readme"
+}
