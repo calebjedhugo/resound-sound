@@ -21,7 +21,6 @@ export default class SoundManager {
   }
 
   verifySoundUnlocked = () => {
-    console.log('HERE');
     if (this.soundUnlocked || !this.soundscape) {
       return;
     }
