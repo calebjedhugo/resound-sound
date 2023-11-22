@@ -1,4 +1,4 @@
-class resoundSound {
+class ResoundSound {
   constructor(instrument) {
     this.instrument = instrument;
   }
