@@ -11,7 +11,7 @@ class ResoundSound {
     this.instrument = instrument;
   }
 
-  play({ length = 3000 }) {
+  play({ length = 3000 } = {}) {
     const oscillator = this.soundScape.createOscillator();
     oscillator.type = this.instrument;
 
