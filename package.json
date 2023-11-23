@@ -1,13 +1,17 @@
 {
   "name": "resound-sound",
-  "version": "1.0.0",
+  "version": "0.0.0",
   "description": "A web audio sound library",
-  "main": "main.js",
+  "main": "dist/index.js",
+  "files": [
+    "dist/index.js"
+  ],
   "private": "true",
   "scripts": {
     "test": "test",
     "start": "cd editor && npm start",
-    "build": "webpack"
+    "build": "webpack",
+    "dist": "webpack --mode production"
   },
   "repository": {
     "type": "git",
