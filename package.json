@@ -8,7 +8,7 @@
   ],
   "scripts": {
     "test": "test",
-    "start": "cd editor && npm start",
+    "start": "cd src/editor && npm start",
     "build": "webpack",
     "dist": "webpack --mode production"
   },
