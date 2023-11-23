@@ -6,7 +6,7 @@ function App() {
     <div className="App">
       <button
         onClick={() => {
-          new ResoundSound().play();
+          new ResoundSound('sawtooth').play({ length: 500, pitch: 'Ab4' });
         }}
       >
         Play

@@ -22,19 +22,17 @@ const noteConvert = (note) => {
     let sharpsVsFlats = 0;
     while (/#|b/.test(f[idx])) {
       if (f[idx] === '#') {
-        f[0] = Object.keys(this.notesMeta)[(this.notesMeta[f[0]][1] + 1) % 12];
+        f[0] = Object.keys(notesMeta)[(notesMeta[f[0]][1] + 1) % 12];
         sharpsVsFlats += 1;
       }
       if (f[idx] == 'b') {
-        f[0] = Object.keys(this.notesMeta)[
-          (this.notesMeta[f[0]][1] + 143) % 12
-        ];
+        f[0] = Object.keys(notesMeta)[(notesMeta[f[0]][1] + 143) % 12];
         sharpsVsFlats -= 1;
       }
       idx += 1;
     }
-    if (this.notesMeta[noteInitial][1] + sharpsVsFlats < 0) octave -= 1;
-    if (this.notesMeta[noteInitial][1] + sharpsVsFlats > 11) octave += 1;
+    if (notesMeta[noteInitial][1] + sharpsVsFlats < 0) octave -= 1;
+    if (notesMeta[noteInitial][1] + sharpsVsFlats > 11) octave += 1;
     return `${f[0]}/${octave}`;
   } catch (e) {
     console.error(`${note} could not be converted.`);

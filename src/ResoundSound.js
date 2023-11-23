@@ -1,6 +1,13 @@
+import pitchToFrequency from './utils/pitchToFrequency';
 import SoundManager from './SoundManager';
 
+/**
+ * @class
+ */
 class ResoundSound {
+  /**
+   * @param {"sine"|"triangle"|"sawtooth"} instrument
+   */
   constructor(instrument = 'sine') {
     if (!window.resoundSoundscape) {
       const soundManager = new SoundManager();
@@ -8,19 +15,25 @@ class ResoundSound {
       window.resoundSoundscape = soundManager.soundscape;
     }
     this.soundScape = window.resoundSoundscape;
-    this.instrument = instrument;
+    this.oscillator = this.soundScape.createOscillator();
+    this.oscillator.type = instrument;
   }
 
-  play({ length = 3000 } = {}) {
-    const oscillator = this.soundScape.createOscillator();
-    oscillator.type = this.instrument;
+  setPitch(pitch) {
+    console.log(pitchToFrequency(pitch));
+    this.oscillator.frequency.setValueAtTime(
+      pitchToFrequency(pitch),
+      this.soundScape.currentTime
+    );
+  }
 
-    oscillator.connect(this.soundScape.destination);
-
-    oscillator.start();
+  play({ length = 3000, pitch = 'A4' } = {}) {
+    this.oscillator.connect(this.soundScape.destination);
+    this.setPitch(pitch);
+    this.oscillator.start();
 
     setTimeout(() => {
-      oscillator.stop();
+      this.oscillator.stop();
     }, length);
   }
 }
