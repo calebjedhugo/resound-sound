@@ -1,12 +1,12 @@
 import Component from './Component.js';
-import SoundManager from '../../SoundManager.js';
+import { ResoundSound } from '../../ResoundSound.js';
 
 class PlayButton extends Component {
   constructor(parent) {
     super('button', parent);
     this.elem.textContent = 'Play';
-    this.soundManager = new SoundManager();
-    this.elem.onclick = this.soundManager.verifySoundUnlocked;
+    this.player = new ResoundSound();
+    this.elem.onclick = this.player.play();
   }
 }
 
