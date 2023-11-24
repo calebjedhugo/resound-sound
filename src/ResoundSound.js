@@ -24,16 +24,27 @@ class ResoundSound {
     this.soundScape = window.resoundSoundscape;
   }
 
-  connectOscillator() {
+  /**
+   * Creates the oscillator, sets it to this.oscillator, and connects it to passed value
+   * @param {object} connectTo - the node that the oscillator will connect to. Defaults to this.soundScape.destination.
+   * @returns {object} the constructed oscillator
+   */
+  connectOscillator(connectTo = this.soundScape.destination) {
     this.oscillator = this.soundScape.createOscillator();
-    this.oscillator.connect(this.soundScape.destination);
+    this.oscillator.connect(connectTo);
     this.oscillator.type = this.type;
+    return this.oscillator;
   }
 
-  connectGainNode() {
+  /**
+   * Creates the gain node, sets it to this.gainNode, and connects it to passed value
+   * @param {object} connectTo  - the node that the oscillator will connect to. Defaults to this.soundScape.destination.
+   * @returns {object} the constructed gain node
+   */
+  connectGainNode(connectTo = this.soundScape.destination) {
     this.gainNode = this.soundScape.createGain();
-    this.oscillator.connect(this.gainNode);
-    this.gainNode.connect(this.soundScape.destination);
+    this.gainNode.connect(connectTo);
+    return this.gainNode;
   }
 
   setPitch(pitch) {
@@ -74,10 +85,13 @@ class ResoundSound {
     if (this.oscillator) {
       this.oscillator.stop();
     }
-    this.connectOscillator();
-    this.setPitch(pitch);
+    // Connect gain node to the soundscape
     this.connectGainNode();
     this.setVolume({ dynamic, length });
+
+    // Connect oscillator to the gain node
+    this.connectOscillator(this.gainNode);
+    this.setPitch(pitch);
 
     // Start the playback
     this.oscillator.start();
