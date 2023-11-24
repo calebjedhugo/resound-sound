@@ -53,10 +53,17 @@ class ResoundSound {
     const gainLevel = 1; // do something with dynamics here
     gain.setValueAtTime(0, currentTime);
     gain.linearRampToValueAtTime(gainLevel, currentTime + attack);
-    gain.linearRampToValueAtTime(
-      gainLevel * Math.exp(-decay * lengthInSeconds),
-      currentTime + attack + lengthInSeconds
-    );
+
+    const steps = 100; // Number of steps for the decay
+
+    const decayInterval = lengthInSeconds / steps;
+
+    let currentGain = gainLevel;
+    for (let i = 0; i < steps; i++) {
+      currentGain *= Math.exp(-decay * decayInterval * i);
+      const time = currentTime + attack + i * decayInterval;
+      gain.linearRampToValueAtTime(currentGain, time);
+    }
     gain.linearRampToValueAtTime(
       0,
       currentTime + attack + lengthInSeconds + release
