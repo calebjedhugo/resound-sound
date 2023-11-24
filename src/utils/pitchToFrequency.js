@@ -11,7 +11,7 @@ const pitchToFrequency = (pitchOrFrequency) => {
     return pitchOrFrequency;
   }
   if (Boolean(Number(pitchOrFrequency))) return Number(pitchOrFrequency);
-  console.log(noteConvert(pitchOrFrequency));
+
   if (frequencies[noteConvert(pitchOrFrequency)]) {
     return frequencies[noteConvert(pitchOrFrequency)];
   }
