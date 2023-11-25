@@ -81,16 +81,21 @@ class ResoundSound {
     );
   }
 
+  prime() {
+    // Connect gain node to the soundscape
+    this.connectGainNode();
+
+    // Connect oscillator to the gain node
+    this.connectOscillator(this.gainNode);
+  }
+
   play({ length = 3000, pitch = 'A4', dynamic, articulation } = {}) {
     if (this.oscillator) {
       this.oscillator.stop();
     }
-    // Connect gain node to the soundscape
-    this.connectGainNode();
-    this.setVolume({ dynamic, length });
 
-    // Connect oscillator to the gain node
-    this.connectOscillator(this.gainNode);
+    this.prime();
+    this.setVolume({ dynamic, length });
     this.setPitch(pitch);
 
     // Start the playback
