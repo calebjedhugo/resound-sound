@@ -25,6 +25,7 @@ const frequencies = {
   'A/4': 440,
   'Bb/4': 466.16,
   'B/4': 493.88,
+  'C/5': 523.252,
 };
 
 export { dynamics, frequencies };
