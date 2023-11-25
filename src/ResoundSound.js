@@ -56,7 +56,7 @@ class ResoundSound {
 
   setVolume({ dynamic = 'mf', length }) {
     const lengthInSeconds = length / 1000;
-    const { attack = 0.02, decay = 0.2, release = 0.05 } = this.transients;
+    const { attack = 0.02, decay = 0.025, release = 0.05 } = this.transients;
     const {
       gainNode: { gain },
       soundScape: { currentTime },
