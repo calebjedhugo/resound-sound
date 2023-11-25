@@ -1,6 +1,10 @@
 import pitchToFrequency from './utils/pitchToFrequency';
 import SoundManager from './SoundManager';
 
+const defaultAttack = 0.02;
+const defaultDecay = 0.025;
+const defaultRelease = 0.05;
+
 /**
  * @class
  */
@@ -9,9 +13,13 @@ class ResoundSound {
    * @param {object} param0
    * @param {"sine"|"triangle"|"sawtooth"} param0.type
    */
-  constructor({ type = 'sine', transients = {} }) {
+  constructor({ type = 'sine', transients: { attack, decay, release } = {} }) {
     this.setSoundscape();
-    this.transients = transients;
+    this.transients = {
+      attack: attack || defaultAttack,
+      decay: decay || defaultDecay,
+      release: release || defaultRelease,
+    };
     this.type = type;
     this.soundingNodes = {};
     this.stopTimouts = {};
@@ -62,14 +70,14 @@ class ResoundSound {
 
   setVolume({ dynamic = 'mf', length }) {
     const lengthInSeconds = length / 1000;
-    const { attack = 0.02, decay = 0.025, release = 0.05 } = this.transients;
+    const { attack, decay, release } = this.transients;
     const {
       primedNodeSet: {
         gainNode: { gain },
       },
       soundScape: { currentTime },
     } = this;
-    const gainLevel = 1; // do something with dynamics here
+    const gainLevel = 0.5; // do something with dynamics here
     gain.setValueAtTime(0, currentTime);
     gain.linearRampToValueAtTime(gainLevel, currentTime + attack);
 
@@ -100,26 +108,41 @@ class ResoundSound {
     this.connectOscillator(gainNode);
   }
 
+  stopSingle(pitch) {
+    if (!pitch) return;
+    const { gainNode: { gain } = {}, oscillator } =
+      this.soundingNodes[pitch] || {};
+    const {
+      soundScape: { currentTime },
+      transients: { release },
+    } = this;
+    if (this.soundingNodes[pitch]) {
+      // cleanly stop the old node
+      gain.linearRampToValueAtTime(0, currentTime + release);
+      // schedule stopping the oscillator after gain is zero
+      setTimeout(() => oscillator.stop(), release * 1000);
+    } // else do nothing
+  }
+
   stop(pitch) {
+    const { release } = this.transients;
     if (pitch) {
-      if (this.soundingNodes[pitch]) {
-        this.soundingNodes[pitch].oscillator.stop();
-      } // else do nothing
+      this.stopSingle(pitch);
     } else
-      Object.values(this.soundingNodes).forEach(({ oscillator }) =>
-        oscillator.stop()
+      Object.keys(this.soundingNodes).forEach((pitch) =>
+        this.stopSingle(pitch)
       );
   }
 
   play({ length = 3000, pitch = 'A4', dynamic, articulation } = {}) {
+    // stop the playback of the same pitch
+    this.stop(pitch);
+
     this.setVolume({ dynamic, length });
     this.setPitch(pitch);
 
-    // Start the playback (This needs to happen asap!)
+    // Start the playback.
     this.primedNodeSet.oscillator.start();
-
-    // stop the playback of the same pitch
-    this.stop(pitch);
 
     // clear the timeout for old node
     clearTimeout(this.stopTimouts[pitch]);
