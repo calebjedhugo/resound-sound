@@ -1,5 +1,6 @@
 import pitchToFrequency from './utils/pitchToFrequency';
 import SoundManager from './SoundManager';
+import fractionToTime from './utils/fractionToTime';
 
 const defaultAttack = 0.02;
 const defaultDecay = 0.025;
@@ -134,28 +135,47 @@ class ResoundSound {
       );
   }
 
-  play({ length = 3000, pitch = 'A4', dynamic, articulation } = {}) {
-    // stop the playback of the same pitch
-    this.stop(pitch);
+  async play({ data = [], tempo, basis }) {
+    for (let idx = 0; idx < data.length; idx++) {
+      await new Promise((res, rej) => {
+        try {
+          const {
+            length = '1/4',
+            pitch = 'A4',
+            dynamic,
+            articulation,
+          } = data[idx];
+          const lengthMs = fractionToTime(length, tempo, basis);
 
-    this.setVolume({ dynamic, length });
-    this.setPitch(pitch);
+          // stop the playback of the same pitch
+          this.stop(pitch);
 
-    // Start the playback.
-    this.primedNodeSet.oscillator.start();
+          this.setVolume({ dynamic, length: lengthMs });
+          this.setPitch(pitch);
 
-    // clear the timeout for old node
-    clearTimeout(this.stopTimouts[pitch]);
+          // Start the playback.
+          this.primedNodeSet.oscillator.start();
 
-    // push the new node to soundingNodes
-    this.soundingNodes[pitch] = this.primedNodeSet;
+          // clear the timeout for old node if it exists
+          clearTimeout(this.stopTimouts[pitch]);
 
-    this.stopTimouts[pitch] = setTimeout(() => {
-      this.stop(pitch);
-    }, length);
+          // push the new node to soundingNodes
+          this.soundingNodes[pitch] = this.primedNodeSet;
 
-    // prepare for next note
-    this.prime();
+          // prepare for next note
+          this.prime();
+
+          // schedule when the note will stop
+          this.stopTimouts[pitch] = setTimeout(() => {
+            this.stop(pitch);
+            // proceed to the next note in the array
+            res();
+          }, lengthMs);
+        } catch (e) {
+          throw new Error(e);
+        }
+      });
+    }
   }
 }
 
