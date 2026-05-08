@@ -1,10 +1,16 @@
 {
   "compilerOptions": {
     "allowJs": true,
-    "checkJs": true,
+    "checkJs": false,
     "declaration": true,
+    "emitDeclarationOnly": true,
     "outDir": "./dist",
-    "target": "es6"
+    "target": "es2020",
+    "moduleResolution": "node",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "types": []
   },
-  "include": ["./src/**/*.js"]
+  "include": ["src/**/*.js"],
+  "exclude": ["src/**/*.test.js", "src/editor/**/*", "node_modules"]
 }

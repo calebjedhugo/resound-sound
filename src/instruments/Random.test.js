@@ -1,5 +1,5 @@
-import audioContextManager from 'audio/lib/AudioContextManager';
-import Random from 'audio/instruments/Random';
+import audioContextManager from '../lib/AudioContextManager';
+import Random from './Random';
 
 function captureGraph() {
   const context = audioContextManager.getContext();

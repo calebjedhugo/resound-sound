@@ -1,5 +1,5 @@
-import audioContextManager from 'audio/lib/AudioContextManager';
-import Fountain from 'audio/instruments/Fountain';
+import audioContextManager from '../lib/AudioContextManager';
+import Fountain from './Fountain';
 
 function captureGraph() {
   const context = audioContextManager.getContext();

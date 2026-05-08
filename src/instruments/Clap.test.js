@@ -1,5 +1,5 @@
-import audioContextManager from 'audio/lib/AudioContextManager';
-import Clap from 'audio/instruments/Clap';
+import audioContextManager from '../lib/AudioContextManager';
+import Clap from './Clap';
 
 function captureGraph() {
   const context = audioContextManager.getContext();

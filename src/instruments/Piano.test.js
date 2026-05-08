@@ -1,5 +1,5 @@
-import audioContextManager from 'audio/lib/AudioContextManager';
-import Piano from 'audio/instruments/Piano';
+import audioContextManager from '../lib/AudioContextManager';
+import Piano from './Piano';
 
 // Snapshot Web Audio graph creation against the singleton context.
 // Using the context this way (not a fresh per-test instance) mirrors the
