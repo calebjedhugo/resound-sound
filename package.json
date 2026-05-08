@@ -4,7 +4,8 @@
   "description": "A web audio sound library",
   "main": "dist/index.js",
   "files": [
-    "dist/index.js"
+    "dist/index.js",
+    "dist/index.d.ts"
   ],
   "scripts": {
     "test": "test",
@@ -30,6 +31,7 @@
   "homepage": "https://github.com/calebjedhugo/resound-sound#readme",
   "devDependencies": {
     "concurrently": "^8.2.2",
+    "typescript": "^5.3.3",
     "webpack": "^5.89.0",
     "webpack-cli": "^5.1.4"
   }

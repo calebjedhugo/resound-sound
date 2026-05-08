@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { Piano, sequences } from 'resound-sound';
+
 const PlayButton = () => {
   const instrument = useMemo(() => new Piano(), []);
 

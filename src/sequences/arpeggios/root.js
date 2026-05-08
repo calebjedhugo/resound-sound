@@ -1,5 +1,5 @@
 const arpeggioRoot = {
-  tempo: 120,
+  tempo: 60,
   key: 'C',
   mode: 'ionian',
   data: [
