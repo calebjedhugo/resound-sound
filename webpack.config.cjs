@@ -1,12 +1,6 @@
 const path = require('path');
 
-module.exports = (env, argv) => {
-  const isProduction = argv.mode === 'production';
-  const outputPath = isProduction
-    ? 'dist'
-    : 'src/editor/node_modules/resound-sound/dist';
-
-  return {
+module.exports = (env, argv) => ({
     entry: './src/index.js',
     mode: argv.mode || 'development',
     target: 'web',
@@ -15,11 +9,11 @@ module.exports = (env, argv) => {
     },
     output: {
       filename: 'index.js',
-      path: path.resolve(__dirname, outputPath),
+      path: path.resolve(__dirname, 'dist'),
       library: { type: 'module' },
       module: true,
       environment: { module: true },
-      clean: true,
+      clean: false,
     },
     resolve: {
       extensions: ['.js'],
@@ -39,5 +33,4 @@ module.exports = (env, argv) => {
         },
       ],
     },
-  };
-};
+  });

@@ -21,8 +21,9 @@
   ],
   "scripts": {
     "test": "jest",
-    "start": "concurrently \"cd src/editor && npm start\" \"npm run webpack\"",
+    "start": "concurrently --names webpack,tsc,editor \"npm run webpack\" \"npm run watch:types\" \"cd src/editor && npm start\"",
     "webpack": "webpack --watch --mode development",
+    "watch:types": "tsc --watch --preserveWatchOutput",
     "build": "webpack --mode production && tsc",
     "build:types": "tsc"
   },
