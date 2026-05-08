@@ -1,12 +1,13 @@
-import {
-  Piano,
-  Fountain,
-  Random,
-  Clap,
-  audioContextManager,
-} from 'resound-sound';
+import * as ResoundSound from 'resound-sound';
 
-const INSTRUMENT_CLASSES = { Piano, Fountain, Random, Clap };
+const { audioContextManager } = ResoundSound;
+
+// Synth is the design surface for new sounds; everything else is in the picker
+// for tweaking the existing instruments' tunables.
+const INSTRUMENT_NAMES = ['Synth', 'Piano', 'Fountain', 'Random', 'Clap'];
+const INSTRUMENT_CLASSES = Object.fromEntries(
+  INSTRUMENT_NAMES.filter((n) => ResoundSound[n]).map((n) => [n, ResoundSound[n]])
+);
 const PITCHES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 const KEY_TO_OFFSET = {
   a: 0,  w: 1,  s: 2,  e: 3,  d: 4,  f: 5,
@@ -15,10 +16,13 @@ const KEY_TO_OFFSET = {
 };
 
 const state = {
-  instrumentName: 'Piano',
+  instrumentName: 'Synth',
   instrument: null,
   octave: 4,
 };
+
+const WAVEFORMS = ['sine', 'triangle', 'sawtooth', 'square'];
+const FILTER_TYPES = ['lowpass', 'highpass', 'bandpass'];
 
 const root = document.getElementById('app');
 
@@ -142,6 +146,91 @@ const buildDetunePanel = () => {
   ]);
 };
 
+const buildTimbrePanel = () => {
+  const inst = state.instrument;
+  if (inst.waveform === undefined && inst.filterType === undefined && inst.filterCutoff === undefined) {
+    return null;
+  }
+  const children = [h('h2', {}, 'Timbre')];
+
+  if (inst.waveform !== undefined) {
+    const select = h('select', {
+      onChange: (e) => { inst.waveform = e.target.value; },
+    }, WAVEFORMS.map((w) => h('option', { value: w, selected: w === inst.waveform }, w)));
+    children.push(h('label', { class: 'slider' }, [h('span', {}, 'waveform'), select, h('span', {})]));
+  }
+  if (inst.filterType !== undefined) {
+    const select = h('select', {
+      onChange: (e) => { inst.filterType = e.target.value; },
+    }, FILTER_TYPES.map((f) => h('option', { value: f, selected: f === inst.filterType }, f)));
+    children.push(h('label', { class: 'slider' }, [h('span', {}, 'filter'), select, h('span', {})]));
+  }
+  if (inst.filterCutoff !== undefined) {
+    children.push(slider({
+      label: 'cutoff',
+      value: inst.filterCutoff,
+      min: 100,
+      max: 12000,
+      step: 50,
+      onInput: (v) => { inst.filterCutoff = v; },
+      format: (v) => `${Math.round(v)}Hz`,
+    }));
+  }
+  return h('div', { class: 'panel' }, children);
+};
+
+const buildCreatePanel = () => {
+  const inst = state.instrument;
+  if (state.instrumentName !== 'Synth') return null;
+
+  const nameInput = h('input', { type: 'text', placeholder: 'PascalCaseName', class: 'name-input' });
+  const status = h('p', { class: 'hint' });
+
+  const button = h('button', {
+    onClick: async () => {
+      const name = nameInput.value.trim();
+      status.textContent = '';
+      if (!name) {
+        status.textContent = 'Pick a name first.';
+        return;
+      }
+      const config = {
+        name,
+        envelope: { ...inst.envelope },
+        harmonics: inst.harmonics.map((entry) => ({ ...entry })),
+        detune: [...inst.detune],
+        waveform: inst.waveform,
+        filterType: inst.filterType,
+        filterCutoff: inst.filterCutoff,
+      };
+      try {
+        const response = await fetch('/api/instruments', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(config),
+        });
+        const result = await response.json();
+        if (!response.ok) {
+          status.textContent = `Error: ${result.error}`;
+          return;
+        }
+        status.textContent = `Wrote ${result.file}. Reloading…`;
+        setTimeout(() => window.location.reload(), 600);
+      } catch (e) {
+        status.textContent = `Network error: ${e.message}`;
+      }
+    },
+  }, 'Create instrument');
+
+  return h('section', { class: 'panel' }, [
+    h('h2', {}, 'Save as new instrument'),
+    h('p', { class: 'hint' }, 'Writes src/instruments/<Name>.js and adds it to the package exports. Commit and publish to ship.'),
+    nameInput,
+    button,
+    status,
+  ]);
+};
+
 const buildWaveform = () => {
   const ctx = audioContextManager.getContext();
   const analyser = ctx.createAnalyser();
@@ -228,6 +317,7 @@ const render = () => {
 
   const panels = h('section', { class: 'row' }, [
     controls,
+    buildTimbrePanel(),
     buildEnvelopePanel(),
     buildHarmonicsPanel(),
     buildDetunePanel(),
@@ -238,6 +328,7 @@ const render = () => {
     panels,
     buildWaveform(),
     buildPresetPanel(),
+    buildCreatePanel(),
   );
 };
 

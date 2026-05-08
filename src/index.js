@@ -1,4 +1,5 @@
 export { default as Instrument } from './instruments/Instrument';
+export { default as Synth } from './instruments/Synth';
 export { default as Piano } from './instruments/Piano';
 export { default as Fountain } from './instruments/Fountain';
 export { default as Random } from './instruments/Random';

@@ -96,6 +96,17 @@ header h1 {
   background: #0b1d12;
 }
 
+.name-input {
+  background: #061008;
+  color: #d8e8d8;
+  border: 1px solid #2a5a36;
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-size: 13px;
+  width: 200px;
+  margin-right: 8px;
+}
+
 .preset {
   background: #061008;
   color: #b3d6b3;
