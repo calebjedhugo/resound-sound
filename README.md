@@ -47,8 +47,8 @@ The editor at `src/editor/` is a small Vite playground for designing instruments
 
 ```bash
 npm install
-cd src/editor && npm install
-cd - && npm start
+(cd src/editor && npm install)
+npm start
 ```
 
 The playground opens at `http://localhost:5174/`. Tune the `Synth` envelope, waveform, filter, harmonics, and detune until it sounds right; type a `PascalCase` name and hit **Save as new instrument** — a `src/instruments/<Name>.js` file is templated to disk and exported from `src/index.js`. Commit, `npm version patch`, `npm publish`.

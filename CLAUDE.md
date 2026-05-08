@@ -4,13 +4,16 @@ Published Web Audio package extracted from `resound-fe/src/audio/`. See `README.
 
 ## Outstanding TODOs
 
-- [ ] **Add `NPM_TOKEN` secret to GitHub repo before the next release.** Without it, `.github/workflows/release.yml` will fail at the `npm publish` step. Generate at npmjs.com → Access Tokens → Classic → **Automation** type (regular tokens require an OTP at publish time, which CI can't provide). Then add at github.com/calebjedhugo/resound-sound → Settings → Secrets and variables → Actions → `NPM_TOKEN`.
+**IMPORTANT:** Add `NPM_TOKEN` secret to the GitHub repo before the next release — without it `.github/workflows/release.yml` fails at `npm publish`.
+
+1. npmjs.com → Access Tokens → Classic → **Automation** type. (Regular tokens require an OTP at publish time, which CI can't provide.)
+2. github.com/calebjedhugo/resound-sound → Settings → Secrets and variables → Actions → New secret named `NPM_TOKEN`.
 
 ## Architecture
 
 - `src/instruments/` — `Instrument` base + concrete classes (`Synth`, `Piano`, `Fountain`, `Random`, `Clap`). Each subclass implements `startNote(pitch, duration)`.
 - `src/lib/` — `AudioContextManager` (singleton), `Envelope`, `MusicalClock`, `duration`, `noteFrequencies`.
-- `src/index.js` — public exports. **The Vite middleware in `src/editor/vite.config.js` patches this file when you create new instruments via the editor UI**, so don't get clever with the export-block formatting.
+- `src/index.js` — public exports. **NEVER reformat the export block** — the Vite middleware in `src/editor/vite.config.js` parses it with a regex when the editor creates new instruments.
 - `src/editor/` — Vite playground for designing sounds. Plain JS, no React. Excluded from npm tarball.
 
 ## Workflows
@@ -41,12 +44,12 @@ Editor only knows the synth topology. Noise-based instruments (Clap-style) still
 
 ## Gotchas
 
-- **`"type": "module"` is set**, so `babel.config.cjs` and `webpack.config.cjs` use the `.cjs` extension. Don't rename them back to `.js`.
-- **`AudioContextManager` is a module-level singleton.** A consumer with two copies of `resound-sound` in its node_modules tree gets two AudioContexts and timing weirdness. After linking, run `npm ls resound-sound` in the consumer to confirm exactly one.
-- **`Instrument.pause()` does not interrupt an in-flight `setTimeout` sleep.** The next scheduled note plays before the loop honors `shouldStop`. The Piano pause test pins `currentIndex=2` after pausing mid-note-0 of a 3-note phrase. Established behavior — don't "fix" it.
+- **NEVER rename `babel.config.cjs` or `webpack.config.cjs` to `.js`** — `package.json` sets `"type": "module"`, so config files must stay `.cjs`.
+- **NEVER "fix" the `Instrument.pause()` quirk.** It does not interrupt an in-flight `setTimeout` sleep, so the next scheduled note plays before the loop honors `shouldStop`. The Piano pause test pins `currentIndex=2` after pausing mid-note-0 of a 3-note phrase. Established behavior — locked in by the test.
+- **IMPORTANT: `AudioContextManager` is a module-level singleton.** Two copies of `resound-sound` in a consumer's `node_modules` tree gives two AudioContexts and timing weirdness. After linking, verify with `npm ls resound-sound` in the consumer.
+- **IMPORTANT: Consumers using jest need `transformIgnorePatterns: ['/node_modules/(?!(resound-sound)/)']`** — the published bundle is ESM and babel-jest skips `node_modules` by default.
+- **Vite 4, not 5.** Vite 5 requires Node 18+; user is on Node 16. Matches resound-fe.
 - **`Instrument.play()` with `data: []` crashes** at `playSchedule[playSchedule.length - 1].duration`. Known bug, out of scope for v0.1.x.
-- **Vite 4 specifically.** Vite 5 needs Node 18+; user is on Node 16. Match resound-fe.
-- **Consumers need `transformIgnorePatterns: ['/node_modules/(?!(resound-sound)/)']`** in their jest config — the published bundle is ESM and babel-jest skips `node_modules` by default.
 
 ## Consumer
 
