@@ -2,16 +2,17 @@
 
 Published Web Audio package extracted from `resound-fe/src/audio/`. See `README.md` for usage and `CHANGELOG.md` for history.
 
-## Outstanding TODOs
+## Release prerequisites
 
-**IMPORTANT:** Add `NPM_TOKEN` secret to the GitHub repo before the next release — without it `.github/workflows/release.yml` fails at `npm publish`.
-
-1. npmjs.com → Access Tokens → Classic → **Automation** type. (Regular tokens require an OTP at publish time, which CI can't provide.)
-2. github.com/calebjedhugo/resound-sound → Settings → Secrets and variables → Actions → New secret named `NPM_TOKEN`.
+`NPM_TOKEN` (npm **Automation** token) is configured as a GitHub Actions secret — `.github/workflows/release.yml` uses it to `npm publish` on `v*` tag push. If publishing ever fails on auth, rotate the token at npmjs.com → Access Tokens → Classic → Automation, then update the `NPM_TOKEN` secret at github.com/calebjedhugo/resound-sound → Settings → Secrets and variables → Actions.
 
 ## Architecture
 
-- `src/instruments/` — `Instrument` base + concrete classes (`Synth`, `Piano`, `Fountain`, `Random`, `Clap`). Each subclass implements `startNote(pitch, duration)`.
+- `src/instruments/` — `Instrument` base + concrete classes (`Synth`, `Piano`, `Fountain`, `Random`, `Clap`). Each subclass implements `startNote(pitch, duration, velocity?)`.
+  - `Piano` — additive concert-grand synth (~15–46 oscillators/note; velocity-sensitive; continuous per-pitch tuning), tuned against real grand samples. Plays back from cheap pre-rendered `AudioBuffer`s (ONE `BufferSourceNode`/note, ~40× cheaper) when available; falls back to the live additive synth otherwise.
+    - **Default = lazy auto-cache:** first strike of a pitch renders live, then its buffer renders in the background (`OfflineAudioContext`, reusing `scheduleNote()`) into velocity layers (default 4) + loudness trim, so later strikes are cheap. Auto-disables where `OfflineAudioContext` is unavailable (e.g. jsdom test envs) → stays live, so consumers/tests don't break.
+    - **`await piano.warm([pitches])`** pre-renders at load — REQUIRED for mobile/dense polyphony to avoid first-hit live spikes.
+    - **`new Piano(id, { autoSample: false })`** = pure live (continuous velocity, max fidelity). Also `{ layers, maxCacheEntries }`.
 - `src/lib/` — `AudioContextManager` (singleton), `Envelope`, `MusicalClock`, `duration`, `noteFrequencies`.
 - `src/index.js` — public exports. **NEVER reformat the export block** — the Vite middleware in `src/editor/vite.config.js` parses it with a regex when the editor creates new instruments.
 - `src/editor/` — Vite playground for designing sounds. Plain JS, no React. Excluded from npm tarball.

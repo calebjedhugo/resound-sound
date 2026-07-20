@@ -2,6 +2,20 @@
 
 All notable changes to this package follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] — 2026-07-19
+
+### Changed
+- **`Piano` completely re-synthesized** as an additive concert-grand model tuned against real sampled-grand recordings, replacing the previous triangle + sine-harmonics timbre. Continuous, seam-free per-pitch tuning (Railsback inharmonicity, soundboard formant, register-dependent brightness and decay), per-partial double decay with upper-partial darkening, unison detuned string pairs, per-voice random start phase, an onset-brightness "hammer" attack, and a soft-knee bus limiter.
+- `Piano` now plays back from cheap pre-rendered `AudioBuffer`s by default (lazy auto-cache): the first strike of a pitch renders live, then its buffer renders in the background and every later strike plays as a single `BufferSourceNode` (~40× cheaper for dense/mobile polyphony). Falls back to live synthesis where `OfflineAudioContext` is unavailable.
+
+### Added
+- Velocity-sensitive playback: `startNote(pitch, duration, velocity?)` plus an optional `velocity` (0–1) field on notes, threaded through `Instrument`. Velocity scales loudness, brightness, and (in the bass) attack.
+- `Piano.warm(pitches)` to pre-render pitches at load — recommended for mobile / dense polyphony to avoid first-hit render spikes.
+- `Piano` constructor options `{ autoSample, layers, maxCacheEntries }`; `{ autoSample: false }` forces pure live (continuous-velocity, max-fidelity) playback.
+
+### Removed
+- `Piano`'s `envelope` / `harmonics` / `detune` tunable properties (superseded by the additive model).
+
 ## [0.1.0] — 2026-05-08
 
 Initial publish, extracted from the Resound game's `src/audio/` module.

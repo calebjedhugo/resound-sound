@@ -49,6 +49,10 @@ class MockOscillatorNode {
       setTimeout(() => this.onended(), 0);
     }
   }
+
+  setPeriodicWave() {
+    this.type = 'custom';
+  }
 }
 
 class MockBiquadFilterNode {
@@ -77,12 +81,33 @@ class MockBiquadFilterNode {
   disconnect() {}
 }
 
+class MockWaveShaperNode {
+  constructor() {
+    this.curve = null;
+    this.oversample = 'none';
+  }
+
+  connect() {
+    return this;
+  }
+
+  disconnect() {}
+}
+
 class MockAudioContext {
   constructor() {
     this.currentTime = 0;
     this.destination = {};
     this.state = 'running';
     this.sampleRate = 44100;
+  }
+
+  createWaveShaper() {
+    return new MockWaveShaperNode();
+  }
+
+  createPeriodicWave() {
+    return {};
   }
 
   createOscillator() {
@@ -125,6 +150,22 @@ class MockAudioContext {
     return Promise.resolve();
   }
 }
+
+class MockOfflineAudioContext extends MockAudioContext {
+  constructor(channels = 1, length = 44100, sampleRate = 44100) {
+    super();
+    this.length = length;
+    this.sampleRate = sampleRate;
+    this.numberOfChannels = channels;
+  }
+
+  startRendering() {
+    return Promise.resolve(this.createBuffer(this.numberOfChannels, this.length, this.sampleRate));
+  }
+}
+
+global.OfflineAudioContext = MockOfflineAudioContext;
+global.webkitOfflineAudioContext = MockOfflineAudioContext;
 
 if (typeof window === 'undefined') {
   global.window = {

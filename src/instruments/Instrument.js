@@ -189,8 +189,9 @@ class Instrument {
       this.noteCallback(noteEvent);
     }
 
-    // Create and play note (Web Audio schedules it)
-    this.startNote(note.pitch, duration);
+    // Create and play note (Web Audio schedules it). velocity (0-1) is optional
+    // and only meaningful to instruments that model it (e.g. Piano).
+    this.startNote(note.pitch, duration, note.velocity);
   }
 
   /**
@@ -221,7 +222,7 @@ class Instrument {
     // Start all notes (Web Audio schedules them)
     notes.forEach((note, i) => {
       if (note.pitch && note.pitch !== undefined && note.pitch !== null) {
-        this.startNote(note.pitch, durations[i]);
+        this.startNote(note.pitch, durations[i], note.velocity);
       }
     });
   }
@@ -320,7 +321,7 @@ class Instrument {
     }
 
     // Create and play note
-    this.startNote(note.pitch, duration);
+    this.startNote(note.pitch, duration, note.velocity);
     await sleep(duration);
   }
 
@@ -351,7 +352,7 @@ class Instrument {
     // Start all notes (they clean themselves up)
     notes.forEach((note, i) => {
       if (note.pitch && note.pitch !== undefined && note.pitch !== null) {
-        this.startNote(note.pitch, durations[i]);
+        this.startNote(note.pitch, durations[i], note.velocity);
       }
     });
 

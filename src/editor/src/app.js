@@ -19,6 +19,7 @@ const state = {
   instrumentName: 'Synth',
   instrument: null,
   octave: 4,
+  velocity: 0.7, // strike velocity 0-1 (Piano responds to this)
 };
 
 const WAVEFORMS = ['sine', 'triangle', 'sawtooth', 'square'];
@@ -59,8 +60,9 @@ const buildInstrument = (name) => new INSTRUMENT_CLASSES[name](`editor-${name.to
 const playPitch = (offset) => {
   const noteIndex = ((offset % 12) + 12) % 12;
   const oct = state.octave + Math.floor(offset / 12);
+  const velocity = state.velocity;
   state.instrument.play({
-    data: [{ pitch: `${PITCHES[noteIndex]}/${oct}`, length: '1/4' }],
+    data: [{ pitch: `${PITCHES[noteIndex]}/${oct}`, length: '1/4', velocity }],
     tempo: 120,
     basis: 4,
   });
@@ -68,12 +70,13 @@ const playPitch = (offset) => {
 
 const playArpeggio = () => {
   const o = state.octave;
+  const velocity = state.velocity;
   state.instrument.play({
     data: [
-      { pitch: `C/${o}`, length: '1/8' },
-      { pitch: `E/${o}`, length: '1/8' },
-      { pitch: `G/${o}`, length: '1/8' },
-      { pitch: `C/${o + 1}`, length: '1/4' },
+      { pitch: `C/${o}`, length: '1/8', velocity },
+      { pitch: `E/${o}`, length: '1/8', velocity },
+      { pitch: `G/${o}`, length: '1/8', velocity },
+      { pitch: `C/${o + 1}`, length: '1/4', velocity },
     ],
     tempo: 120,
     basis: 4,
@@ -302,6 +305,16 @@ const render = () => {
     format: (v) => String(v),
   });
 
+  const velocitySlider = slider({
+    label: 'Velocity',
+    value: state.velocity,
+    min: 0,
+    max: 1,
+    step: 0.01,
+    onInput: (v) => { state.velocity = v; },
+    format: (v) => v.toFixed(2),
+  });
+
   const hintText = () =>
     `Keys a-k play C${state.octave}–C${state.octave + 1} (w/e/t/y/u = black keys). Space plays arpeggio.`;
   const hint = h('p', { class: 'hint' }, hintText());
@@ -310,6 +323,7 @@ const render = () => {
     h('h2', {}, 'Instrument'),
     select,
     octaveSlider,
+    velocitySlider,
     h('button', { onClick: () => playPitch(0) }, 'Play root'),
     h('button', { onClick: playArpeggio }, 'Play arpeggio'),
     h('button', { onClick: () => state.instrument.stop() }, 'Stop'),

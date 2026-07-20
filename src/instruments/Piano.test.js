@@ -1,4 +1,5 @@
 import audioContextManager from '../lib/AudioContextManager';
+import { getFrequency } from '../lib/noteFrequencies';
 import Piano from './Piano';
 
 // Snapshot Web Audio graph creation against the singleton context.
@@ -51,8 +52,13 @@ describe('Piano playback', () => {
     jest.restoreAllMocks();
   });
 
+  // Voice counts are register-dependent (partials + unison pairs); derive them
+  // from the model itself so these tests survive tuning-constant changes.
+  const voiceCount = (pitch) => new Piano().buildVoices(getFrequency(pitch)).length;
+  const A4_VOICES = voiceCount('A/4');
+
   describe('a single note', () => {
-    it('schedules every oscillator the Piano timbre requires', async () => {
+    it('schedules one decaying sine oscillator per voice', async () => {
       const piano = new Piano();
       const playPromise = piano.play({
         data: [{ pitch: 'A/4', length: '1/4' }],
@@ -63,24 +69,22 @@ describe('Piano playback', () => {
       // Note is dispatched synchronously at index 0; let microtasks settle.
       await Promise.resolve();
 
-      // Piano timbre: 3 detuned triangle oscillators (chorus) + 4 sine harmonics.
-      expect(graph.oscillators).toHaveLength(7);
+      // Additive timbre: every voice is its own oscillator, set to a
+      // single-harmonic wavetable (a sine at a seeded random start phase).
+      expect(graph.oscillators).toHaveLength(A4_VOICES);
+      graph.oscillators.forEach((osc) => expect(osc.type).toBe('custom'));
 
-      const triangles = graph.oscillators.filter((o) => o.type === 'triangle');
-      const sines = graph.oscillators.filter((o) => o.type === 'sine');
-      expect(triangles).toHaveLength(3);
-      expect(sines).toHaveLength(4);
-
-      // All chorus oscillators sit on the fundamental (440 Hz).
-      triangles.forEach((osc) => {
-        expect(osc.frequency.setValueAtTime).toHaveBeenCalledWith(440, expect.any(Number));
-      });
-
-      // Harmonics are at 2x, 3x, 4x, 5x the fundamental.
-      const harmonicFreqs = sines
+      const freqs = graph.oscillators
         .map((osc) => osc.frequency.setValueAtTime.mock.calls[0][0])
         .sort((a, b) => a - b);
-      expect(harmonicFreqs).toEqual([880, 1320, 1760, 2200]);
+      // The lowest voices are the fundamental's detuned unison pair (~440 Hz).
+      expect(freqs[0]).toBeGreaterThan(435);
+      expect(freqs[0]).toBeLessThan(445);
+      // Higher partials climb the harmonic series: something near the 2nd (~880)
+      // and 3rd (~1320) partials is present.
+      expect(freqs.some((f) => f > 860 && f < 900)).toBe(true);
+      expect(freqs.some((f) => f > 1290 && f < 1360)).toBe(true);
+      expect(Math.max(...freqs)).toBeLessThan(7000);
 
       // Every oscillator is started and scheduled to stop after the note duration.
       graph.oscillators.forEach((osc) => {
@@ -95,7 +99,7 @@ describe('Piano playback', () => {
       await playPromise;
     });
 
-    it('inserts the warmth filter (lowpass at 3 kHz)', async () => {
+    it('inserts one non-resonant lowpass filter for the hammer thump', async () => {
       const piano = new Piano();
       const playPromise = piano.play({
         data: [{ pitch: 'A/4', length: '1/4' }],
@@ -104,18 +108,16 @@ describe('Piano playback', () => {
       });
       await Promise.resolve();
 
+      // Partial brightness is baked into the amplitudes; the only biquad is the
+      // lowpass shaping the soft felt-hammer knock (no resonant "bamboo" ping).
       expect(graph.filters).toHaveLength(1);
       expect(graph.filters[0].type).toBe('lowpass');
-      expect(graph.filters[0].frequency.setValueAtTime).toHaveBeenCalledWith(
-        3000,
-        expect.any(Number)
-      );
 
       await jest.advanceTimersByTimeAsync(QUARTER_AT_120);
       await playPromise;
     });
 
-    it('schedules an ADSR envelope in order: silent → attack peak → decay → sustain hold → release', async () => {
+    it('gives each voice a bloom → prompt → tail → damper envelope', async () => {
       const piano = new Piano();
       const playPromise = piano.play({
         data: [{ pitch: 'A/4', length: '1/4' }],
@@ -124,43 +126,52 @@ describe('Piano playback', () => {
       });
       await Promise.resolve();
 
-      // The envelope gain is identified by its first ramp target: the attack peak (1.0).
-      const envelopeGain = graph.gains.find(
-        (g) => g.gain.linearRampToValueAtTime.mock.calls[0]?.[0] === 1.0
+      // 1 volumeGain + one gain per voice + 1 hammer-noise gain.
+      expect(graph.gains).toHaveLength(2 + A4_VOICES);
+
+      // Voice gains are the ones with linear ramps scheduled (bloom + damper);
+      // the volume gain sets a static value and the hammer gain only has an
+      // exponential decay, so this cleanly selects the partial voices.
+      const voiceGains = graph.gains.filter(
+        (g) => g.gain.linearRampToValueAtTime.mock.calls.length > 0
       );
-      expect(envelopeGain).toBeDefined();
+      expect(voiceGains).toHaveLength(A4_VOICES);
 
-      const setCalls = envelopeGain.gain.setValueAtTime.mock.calls;
-      const rampCalls = envelopeGain.gain.linearRampToValueAtTime.mock.calls;
+      voiceGains.forEach((g) => {
+        const setCalls = g.gain.setValueAtTime.mock.calls;
+        const linCalls = g.gain.linearRampToValueAtTime.mock.calls;
+        const expCalls = g.gain.exponentialRampToValueAtTime.mock.calls;
 
-      // Piano sustain = 0.3 (per Piano.envelope).
-      // Schedule: setValueAtTime(0), ramp→1, ramp→0.3, setValueAtTime(0.3), ramp→0
-      expect(setCalls).toHaveLength(2);
-      expect(rampCalls).toHaveLength(3);
+        // Double-decay envelope: setValueAtTime(~0) → linear bloom up → exp
+        // "prompt" drop to the knee → exp long tail → linear damper to ~0.
+        expect(setCalls[0][0]).toBeCloseTo(0, 3); // near-silent start
+        const bloomPeak = linCalls[0][0];
+        expect(bloomPeak).toBeGreaterThan(0);
+        expect(expCalls).toHaveLength(2); // prompt + tail
+        const knee = expCalls[0][0];
+        const tailTarget = expCalls[1][0];
+        expect(knee).toBeGreaterThan(0);
+        expect(knee).toBeLessThan(bloomPeak); // prompt heads downward
+        expect(tailTarget).toBeGreaterThan(0);
+        expect(tailTarget).toBeLessThan(knee); // tail keeps decaying
+        // Final event returns to (near) silence for a click-free release.
+        expect(linCalls[linCalls.length - 1][0]).toBeCloseTo(0, 3);
 
-      expect(setCalls[0][0]).toBe(0); // 1. silent at t0
-      expect(rampCalls[0][0]).toBe(1.0); // 2. attack peak
-      expect(rampCalls[1][0]).toBeCloseTo(0.3, 5); // 3. decay landing on sustain
-      expect(setCalls[1][0]).toBeCloseTo(0.3, 5); // 4. hold sustain
-      expect(rampCalls[2][0]).toBe(0); // 5. release to silence
-
-      // Times must be monotonically non-decreasing in the order shown above.
-      const sequence = [
-        setCalls[0][1],
-        rampCalls[0][1],
-        rampCalls[1][1],
-        setCalls[1][1],
-        rampCalls[2][1],
-      ];
-      for (let i = 1; i < sequence.length; i += 1) {
-        expect(sequence[i]).toBeGreaterThanOrEqual(sequence[i - 1]);
-      }
+        // Times strictly advance: bloom < prompt < tail < damper.
+        const bloomT = linCalls[0][1];
+        const promptT = expCalls[0][1];
+        const tailT = expCalls[1][1];
+        const damperT = linCalls[linCalls.length - 1][1];
+        expect(promptT).toBeGreaterThan(bloomT);
+        expect(tailT).toBeGreaterThan(promptT);
+        expect(damperT).toBeGreaterThanOrEqual(tailT);
+      });
 
       await jest.advanceTimersByTimeAsync(QUARTER_AT_120);
       await playPromise;
     });
 
-    it('routes harmonics through their own gain node before the filter', async () => {
+    it('routes every voice through its own gain into the volume gain', async () => {
       const piano = new Piano();
       const playPromise = piano.play({
         data: [{ pitch: 'A/4', length: '1/4' }],
@@ -169,14 +180,17 @@ describe('Piano playback', () => {
       });
       await Promise.resolve();
 
-      // 1 volumeGain + 1 envelopeGain + 4 harmonic gains = 6 gain nodes
-      expect(graph.gains).toHaveLength(6);
-
-      // The 4 harmonic gains are the ones connected to the filter.
-      const harmonicGains = graph.gains.filter((g) =>
-        g.connect.mock.calls.some((call) => call[0] === graph.filters[0])
+      // volumeGain is created first. Voice gains are those with linear ramps.
+      const volumeGain = graph.gains[0];
+      const voiceGains = graph.gains.filter(
+        (g) => g.gain.linearRampToValueAtTime.mock.calls.length > 0
       );
-      expect(harmonicGains).toHaveLength(4);
+      expect(voiceGains).toHaveLength(A4_VOICES);
+
+      // Each voice gain connects to the volume gain.
+      voiceGains.forEach((g) => {
+        expect(g.connect.mock.calls.some((call) => call[0] === volumeGain)).toBe(true);
+      });
 
       await jest.advanceTimersByTimeAsync(QUARTER_AT_120);
       await playPromise;
@@ -216,15 +230,16 @@ describe('Piano playback', () => {
       });
       await Promise.resolve();
 
-      // 3 notes × 7 oscillators each = 21
-      expect(graph.oscillators).toHaveLength(21);
+      // Each note contributes its own register-dependent voice count.
+      const expected = voiceCount('C/4') + voiceCount('E/4') + voiceCount('G/4');
+      expect(graph.oscillators).toHaveLength(expected);
 
-      // All three fundamentals present in the triangle set (rounded to whole Hz
-      // so the test survives table-rounding changes in noteFrequencies).
-      const triangleFreqs = graph.oscillators
-        .filter((o) => o.type === 'triangle')
-        .map((o) => Math.round(o.frequency.setValueAtTime.mock.calls[0][0]));
-      expect(triangleFreqs).toEqual(expect.arrayContaining([262, 330, 392]));
+      // All three fundamentals are present. Each is struck as a unison pair
+      // detuned a few cents, so assert a voice lands within ~1% of each.
+      const freqs = graph.oscillators.map((o) => o.frequency.setValueAtTime.mock.calls[0][0]);
+      [262, 330, 392].forEach((target) => {
+        expect(freqs.some((f) => Math.abs(f - target) / target < 0.01)).toBe(true);
+      });
 
       await jest.advanceTimersByTimeAsync(QUARTER_AT_120);
       await playPromise;
@@ -413,8 +428,9 @@ describe('Piano playback', () => {
       });
 
       await Promise.resolve();
+      // Only the first note (C/4) has been dispatched.
       const oscBeforeStop = graph.oscillators.length;
-      expect(oscBeforeStop).toBe(7);
+      expect(oscBeforeStop).toBe(voiceCount('C/4'));
 
       piano.stop();
 
@@ -434,7 +450,7 @@ describe('Piano playback', () => {
   });
 
   describe('updateVolume', () => {
-    it('ramps the volume gain (not harmonic gains) toward the new volume', async () => {
+    it('ramps the volume gain (not voice gains) toward the new volume', async () => {
       const piano = new Piano();
       const playPromise = piano.play({
         data: [{ pitch: 'A/4', length: '1/4' }],
@@ -446,7 +462,7 @@ describe('Piano playback', () => {
       // The first gain created in Piano.startNote is volumeGain — that's the
       // node tracked alongside every oscillator and the one updateVolume targets.
       const volumeGain = graph.gains[0];
-      const harmonicGains = graph.gains.slice(2); // [0]=volumeGain, [1]=envelopeGain
+      const otherGains = graph.gains.slice(1); // voice gains + hammer gain
       // setTargetAtTime isn't in the mock; install it on every gain so we can
       // distinguish which ones actually receive the ramp.
       graph.gains.forEach((g) => {
@@ -462,8 +478,8 @@ describe('Piano playback', () => {
       expect(target).toBe(0.25);
       expect(timeConstant).toBeCloseTo(0.01, 5);
 
-      // Harmonic gains are not the tracked node and should not be touched.
-      harmonicGains.forEach((g) => {
+      // Voice/hammer gains are not the tracked node and should not be touched.
+      otherGains.forEach((g) => {
         expect(g.gain.setTargetAtTime).not.toHaveBeenCalled();
       });
 
@@ -507,6 +523,91 @@ describe('Piano playback', () => {
 
       await jest.advanceTimersByTimeAsync(QUARTER_AT_120);
       await playPromise;
+    });
+  });
+
+  // Opt-in sampled playback: warm() pre-renders pitches to buffers so they play
+  // back cheaply. Default (un-warmed) behaviour stays the full live synth above.
+  describe('sampled playback (warm)', () => {
+    // Count node creation on the singleton (live) context. Offline pre-rendering
+    // happens on separate OfflineAudioContext instances, so it never shows here.
+    function captureCounts() {
+      const context = audioContextManager.getContext();
+      jest.restoreAllMocks(); // drop the outer beforeEach captureGraph spies
+      const counts = { oscillators: 0, gains: 0, bufferSources: 0 };
+      const origOsc = context.createOscillator.bind(context);
+      const origGain = context.createGain.bind(context);
+      const origSrc = context.createBufferSource.bind(context);
+      jest.spyOn(context, 'createOscillator').mockImplementation(() => { counts.oscillators += 1; return origOsc(); });
+      jest.spyOn(context, 'createGain').mockImplementation(() => { counts.gains += 1; return origGain(); });
+      jest.spyOn(context, 'createBufferSource').mockImplementation(() => { counts.bufferSources += 1; return origSrc(); });
+      return counts;
+    }
+
+    it('warm() pre-renders every pitch × velocity layer into the cache', async () => {
+      const piano = new Piano('p', { layers: [0.3, 0.7] });
+      expect(piano.sampleBuffers.size).toBe(0);
+      await piano.warm(['C/2', 'C/4']);
+      expect(piano.sampleBuffers.size).toBe(4); // 2 pitches × 2 layers
+      expect(piano.sampleBuffers.has(`${piano.midiFromFreq(getFrequency('C/4'))}:1`)).toBe(true);
+    });
+
+    it('a warmed note plays back as a single buffer source — not dozens of oscillators', async () => {
+      const piano = new Piano('p', { layers: [0.2, 0.5, 0.8] });
+      await piano.warm(['C/2']);
+
+      const counts = captureCounts();
+      const play = piano.play({ data: [{ pitch: 'C/2', length: '1/4', velocity: 0.8 }], tempo: 120, basis: 4 });
+      await Promise.resolve();
+
+      expect(counts.oscillators).toBe(0); // no live voices
+      expect(counts.bufferSources).toBe(1); // one buffer
+      expect(counts.gains).toBe(1); // one gain
+
+      await jest.advanceTimersByTimeAsync(QUARTER_AT_120);
+      await play;
+    });
+
+    it('by default an un-warmed note renders live, then auto-caches for next time', async () => {
+      const piano = new Piano('p');
+      const counts = captureCounts();
+      const play = piano.play({ data: [{ pitch: 'C/2', length: '1/4', velocity: 0.7 }], tempo: 120, basis: 4 });
+      await Promise.resolve();
+
+      const liveVoices = new Piano('ref', { autoSample: false }).buildVoices(getFrequency('C/2'), 0.7).length;
+      expect(counts.oscillators).toBe(liveVoices); // first strike is the full live synth
+      // ...and a background render was scheduled so the next strike is cheap.
+      expect(piano.pendingRenders.size + piano.sampleBuffers.size).toBeGreaterThan(0);
+
+      await jest.advanceTimersByTimeAsync(QUARTER_AT_120);
+      await play;
+    });
+
+    it('{ autoSample: false } stays pure live — no cache, no background rendering', async () => {
+      const piano = new Piano('p', { autoSample: false });
+      const counts = captureCounts();
+      const play = piano.play({ data: [{ pitch: 'C/2', length: '1/4', velocity: 0.7 }], tempo: 120, basis: 4 });
+      await Promise.resolve();
+
+      expect(counts.oscillators).toBeGreaterThan(0); // live
+      expect(piano.sampleBuffers.size).toBe(0);
+      expect(piano.pendingRenders.size).toBe(0);
+
+      await jest.advanceTimersByTimeAsync(QUARTER_AT_120);
+      await play;
+    });
+
+    it('picks the nearest velocity layer', () => {
+      const piano = new Piano('p', { layers: [0.2, 0.5, 0.8] });
+      expect(piano.nearestLayerIndex(0.2)).toBe(0);
+      expect(piano.nearestLayerIndex(0.38)).toBe(1);
+      expect(piano.nearestLayerIndex(1.0)).toBe(2);
+    });
+
+    it('bass buffers are longer than treble buffers', () => {
+      const piano = new Piano();
+      expect(piano.bufferSeconds(getFrequency('C/2')))
+        .toBeGreaterThan(piano.bufferSeconds(getFrequency('C/5')));
     });
   });
 });
