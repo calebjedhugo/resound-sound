@@ -25,14 +25,17 @@ npm run build       # webpack ESM bundle + tsc declarations to dist/
 npm start           # webpack-watch + tsc-watch + editor on http://localhost:5174
 ```
 
-### Release
+### Release (manual)
+
+Publishing is manual — there is **no** CI auto-publish. (`ci.yml` still runs tests + build on every push/PR; a `prepublishOnly` script builds `dist/` on publish so you can't ship a stale bundle.)
 
 ```bash
-npm version patch   # bumps package.json + creates commit + creates v* tag
-git push --follow-tags
+npm version minor        # or patch — bumps package.json, commits, creates v* tag
+git push --follow-tags   # push the release commit + tag to GitHub
+npm publish --access public   # prepublishOnly runs `npm run build` first
 ```
 
-Tag push triggers `.github/workflows/release.yml`: tests, build, verifies tag matches `package.json` version, then `npm publish`.
+Requires `npm login` with publish rights on `resound-sound`. Update `CHANGELOG.md` before bumping.
 
 ### New instrument via editor
 

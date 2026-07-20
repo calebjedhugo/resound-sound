@@ -25,7 +25,8 @@
     "webpack": "webpack --watch --mode development",
     "watch:types": "tsc --watch --preserveWatchOutput",
     "build": "webpack --mode production && tsc",
-    "build:types": "tsc"
+    "build:types": "tsc",
+    "prepublishOnly": "npm run build"
   },
   "repository": {
     "type": "git",
