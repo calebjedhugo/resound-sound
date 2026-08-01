@@ -2,6 +2,12 @@
 
 All notable changes to this package follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- `initInstruments(config)` / `getInstrument(id)` — eager page-load initialization for sampled instruments (currently `piano`). Constructs each configured instrument, registers it by id in a module-level registry, and `warm()`s the given pitches, so the ~1s pre-render can happen at page load instead of behind the first play tap. Idempotent: a second call with the same `id` reuses the instance and warms any newly-listed pitches; conflicting `layers` on a later call are ignored (original wins) with a `console.warn`. Plain `new Piano(id)` still does not register — no behavior change for existing consumers.
+- `audioContextManager.resumeOnFirstGesture()` — if the singleton `AudioContext` is `suspended` (as it is when constructed outside a user gesture, e.g. by eager `initInstruments`), installs one-time `pointerdown` / `keydown` / `touchend` listeners on `document` that call `context.resume()` and remove themselves. No-op if already `running`; safe to call repeatedly (never installs more than one set of listeners). Called automatically by `initInstruments`.
+
 ## [0.2.0] — 2026-07-19
 
 ### Changed

@@ -10,3 +10,4 @@ export { default as MusicalClock } from './lib/MusicalClock';
 export { applyEnvelope } from './lib/Envelope';
 export { getFrequency } from './lib/noteFrequencies';
 export { getDuration } from './lib/duration';
+export { initInstruments, getInstrument } from './lib/instrumentRegistry';

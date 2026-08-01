@@ -6,6 +6,7 @@ class AudioContextManager {
   constructor() {
     this.context = null;
     this.unlocked = false;
+    this.gestureListenersInstalled = false;
   }
 
   getContext() {
@@ -32,6 +33,32 @@ class AudioContextManager {
 
   getCurrentTime() {
     return this.getContext().currentTime;
+  }
+
+  /**
+   * A context created outside a user gesture (e.g. via eager `initInstruments`
+   * at page load) starts `suspended` and never resumes on its own. If so,
+   * install one-time listeners on `document` (`pointerdown`, `keydown`,
+   * `touchend`) that call `context.resume()` on the first gesture and remove
+   * themselves. No-op if the context is already `running`, if `document`
+   * isn't available (SSR), or if a set of listeners is already installed —
+   * safe to call repeatedly (one set of listeners max).
+   */
+  resumeOnFirstGesture() {
+    const context = this.getContext();
+    if (context.state !== 'suspended') return;
+    if (this.gestureListenersInstalled) return;
+    if (typeof document === 'undefined') return;
+
+    this.gestureListenersInstalled = true;
+
+    const events = ['pointerdown', 'keydown', 'touchend'];
+    const onGesture = () => {
+      context.resume();
+      events.forEach((type) => document.removeEventListener(type, onGesture));
+      this.gestureListenersInstalled = false;
+    };
+    events.forEach((type) => document.addEventListener(type, onGesture));
   }
 }
 

@@ -143,10 +143,12 @@ class MockAudioContext {
   }
 
   resume() {
+    this.state = 'running';
     return Promise.resolve();
   }
 
   suspend() {
+    this.state = 'suspended';
     return Promise.resolve();
   }
 }
@@ -180,3 +182,32 @@ global.AudioContext = MockAudioContext;
 global.webkitAudioContext = MockAudioContext;
 global.window.AudioContext = MockAudioContext;
 global.window.webkitAudioContext = MockAudioContext;
+
+/**
+ * Minimal `document` mock — just enough for
+ * `audioContextManager.resumeOnFirstGesture()` to install/remove one-time
+ * gesture listeners. `listeners` is exposed directly so tests can assert on
+ * it (e.g. `document.listeners.pointerdown`).
+ */
+class MockDocument {
+  constructor() {
+    this.listeners = {};
+  }
+
+  addEventListener(type, handler) {
+    if (!this.listeners[type]) this.listeners[type] = [];
+    this.listeners[type].push(handler);
+  }
+
+  removeEventListener(type, handler) {
+    if (!this.listeners[type]) return;
+    this.listeners[type] = this.listeners[type].filter((h) => h !== handler);
+  }
+
+  dispatchEvent(event) {
+    const handlers = this.listeners[event.type] || [];
+    handlers.slice().forEach((handler) => handler(event));
+  }
+}
+
+global.document = new MockDocument();

@@ -38,8 +38,47 @@ piano.play({
 | `Synth` | Generic subtractive synth. Configurable `waveform`, `filterType`, `filterCutoff`, `envelope`, `harmonics`, `detune`. |
 | `Piano`, `Fountain`, `Random`, `Clap` | Concrete instruments. |
 | `audioContextManager` | Module-level singleton. Lazily creates a unified `AudioContext`, unlocks audio on iOS/Safari. |
+| `initInstruments`, `getInstrument` | Eager page-load init + registry for sampled instruments — see below. |
 | `MusicalClock` | Beat/ms conversions, optional metronome. |
 | `applyEnvelope`, `getFrequency`, `getDuration` | Building-block helpers. |
+
+## Make the piano ready before the first tap
+
+Warming a `Piano` (pre-rendering its sample buffers) normally requires an
+instance, and constructing one creates the singleton `AudioContext`. Do that
+at page load — outside any user gesture — and the context comes up
+`suspended`; nothing resumes it until something calls `resume()` on a
+gesture, but the `OfflineAudioContext` pre-render that `warm()` does needs no
+gesture at all. `initInstruments` splits the two: it constructs and warms
+eagerly, and arms a one-time listener that resumes the live context on the
+user's first tap.
+
+```js
+import { initInstruments, getInstrument } from 'resound-sound';
+
+// At page load — safe outside any user gesture. Fire-and-forget: the
+// pre-render runs in the background while the rest of the page loads.
+initInstruments({
+  piano: {
+    id: 'main-piano',
+    layers: [0.5, 0.65, 0.8, 0.95],
+    pitches: ['C/3', 'D/3', 'E/3', /* ...every pitch this song uses */],
+  },
+});
+
+// Elsewhere — same instance, already warm (or warming).
+const piano = getInstrument('main-piano');
+piano.play({ data: [{ pitch: 'C/3', length: '1/4' }], tempo: 120, basis: 4 });
+```
+
+Per-song warm: call `initInstruments` again with the same `id` and a new
+`pitches` list any time you load a new song — it reuses the existing
+instance and only warms the pitches it hasn't seen yet. `layers` and other
+constructor options are fixed by the first call for a given `id`.
+
+`getInstrument(id)` returns the registered instance, or `undefined` if
+nothing was `initInstruments`'d under that id. Plain `new Piano(id)` never
+registers — no behavior change for existing consumers.
 
 ## Authoring new sounds
 
