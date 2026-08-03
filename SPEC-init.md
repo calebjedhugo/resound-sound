@@ -24,7 +24,8 @@ const { piano } = await initInstruments({
 });
 
 // anywhere else
-const same = getInstrument('my-piano');   // same instance (or undefined)
+const same = getInstrument('my-piano');        // same instance (or undefined)
+const warm = await instrumentReady('my-piano'); // ...once its init has settled
 ```
 
 Behavior:
@@ -47,6 +48,13 @@ Behavior:
    max).
 4. `getInstrument(id)` returns the registered instance or undefined. Plain
    `new Piano(id)` does NOT register (no behavior change for existing users).
+5. **Awaitable from anywhere** (added after the first singHarmony2 round):
+   `instrumentReady(id)` resolves with the instance once the initialization in
+   flight for that id settles, and immediately when none is. It spans every
+   overlapping init for the id, and resolves — never rejects — when warming
+   failed, because the caller is typically a play button holding a loader and
+   an unwarmed instrument still plays live. `initInstruments` keeps resolving
+   on its own pitches.
 
 ## Constraints
 

@@ -14,7 +14,7 @@ Published Web Audio package extracted from `resound-fe/src/audio/`. See `README.
     - **`await piano.warm([pitches])`** pre-renders at load — REQUIRED for mobile/dense polyphony to avoid first-hit live spikes.
     - **`new Piano(id, { autoSample: false })`** = pure live (continuous velocity, max fidelity). Also `{ layers, maxCacheEntries }`.
 - `src/lib/` — `AudioContextManager` (singleton), `Envelope`, `MusicalClock`, `duration`, `noteFrequencies`.
-  - `instrumentRegistry.js` — `initInstruments()` / `getInstrument()`: eager page-load construction + warm of sampled instruments, registered by id (`SPEC-init.md`).
+  - `instrumentRegistry.js` — `initInstruments()` / `getInstrument()` / `instrumentReady()`: eager page-load construction + warm of sampled instruments, registered by id (`SPEC-init.md`). `getInstrument` is synchronous and says nothing about warming; `instrumentReady(id)` is the awaitable one, for code that didn't start the init (a play button tapped mid-warm).
   - `timeline.js` + `Sequencer.js` — schema-native multi-voice playback (`src/SPEC-schema-playback.md`). `buildTimeline()` is the ONE place the shared note schema is interpreted for audio (dotted, tie merging, chords); `Sequencer` runs those events on a 25ms beat-cursor clock with live seek/tempo/mute/loop. **Consumers must never re-implement this in app code** — the same untransformed arrays feed resound-notation's `render()` and this.
 - `src/index.js` — public exports. **NEVER reformat the export block** — the Vite middleware in `src/editor/vite.config.js` parses it with a regex when the editor creates new instruments.
 - `src/editor/` — Vite playground for designing sounds. Plain JS, no React. Excluded from npm tarball.

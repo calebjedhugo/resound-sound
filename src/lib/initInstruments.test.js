@@ -1,6 +1,6 @@
 import audioContextManager from './AudioContextManager';
 import Piano from '../instruments/Piano';
-import { initInstruments, getInstrument } from './instrumentRegistry';
+import { initInstruments, getInstrument, instrumentReady } from './instrumentRegistry';
 
 // Eager-initialization: construct + warm sampled instruments at page load,
 // outside a user gesture. See SPEC-init.md.
@@ -83,6 +83,94 @@ describe('initInstruments / getInstrument', () => {
     new Piano('not-registered-directly');
     expect(getInstrument('not-registered-directly')).toBeUndefined();
     expect(getInstrument('some-id-never-initialized')).toBeUndefined();
+  });
+
+  // A play button tapped mid-init has to wait for the init that is already
+  // running — the alternative is a second instrument racing the first, with the
+  // whole pre-render paid twice and the eagerly warmed one thrown away.
+  describe('instrumentReady', () => {
+    /** A warm() that only finishes when the test says so. */
+    function deferredWarm() {
+      let release;
+      const done = new Promise((resolve) => { release = resolve; });
+      jest.spyOn(Piano.prototype, 'warm').mockReturnValue(done);
+      return release;
+    }
+
+    /** Tracks settlement without awaiting, so "not yet" is assertable. */
+    function watch(promise) {
+      const state = { settled: false, value: undefined };
+      promise.then((value) => { state.settled = true; state.value = value; });
+      return state;
+    }
+
+    // The suite runs on fake timers, so drain the microtask queue by hand —
+    // everything here is promise-chained, nothing waits on a timer.
+    const flush = async () => { for (let i = 0; i < 5; i += 1) await Promise.resolve(); };
+
+    it('resolves on the spot when nothing is initializing', async () => {
+      await initInstruments({ piano: { id: 'ready-idle', pitches: ['C/4'] } });
+
+      await expect(instrumentReady('ready-idle')).resolves.toBe(getInstrument('ready-idle'));
+      await expect(instrumentReady('ready-never-initialized')).resolves.toBeUndefined();
+    });
+
+    it('waits for an init still warming, then hands back that same instance', async () => {
+      const release = deferredWarm();
+      const init = initInstruments({ piano: { id: 'ready-inflight', pitches: ['C/4'] } });
+      const waiter = watch(instrumentReady('ready-inflight'));
+
+      await flush();
+      expect(waiter.settled).toBe(false); // still rendering
+
+      release();
+      await init;
+      await flush();
+
+      expect(waiter.settled).toBe(true);
+      expect(waiter.value).toBe(getInstrument('ready-inflight'));
+    });
+
+    it('waits for a second init that started while the first was still warming', async () => {
+      // singHarmony2 does exactly this: the page-load range warm is still
+      // running when opening a hymn warms that hymn's pitches.
+      const releaseFirst = deferredWarm();
+      const first = initInstruments({ piano: { id: 'ready-overlap', pitches: ['C/4'] } });
+      const releaseSecond = deferredWarm();
+      const second = initInstruments({ piano: { id: 'ready-overlap', pitches: ['D/4'] } });
+      const waiter = watch(instrumentReady('ready-overlap'));
+
+      releaseSecond();
+      await second;
+      await flush();
+      expect(waiter.settled).toBe(false); // the page-load warm is still going
+
+      releaseFirst();
+      await first;
+      await flush();
+      expect(waiter.settled).toBe(true);
+    });
+
+    it('resolves rather than rejecting when warming fails, so a loader always clears', async () => {
+      jest.spyOn(Piano.prototype, 'warm').mockRejectedValue(new Error('no OfflineAudioContext'));
+      const init = initInstruments({ piano: { id: 'ready-failed', pitches: ['C/4'] } });
+
+      await expect(init).rejects.toThrow('no OfflineAudioContext');
+      // an unwarmed piano still plays — it just renders live
+      await expect(instrumentReady('ready-failed')).resolves.toBe(getInstrument('ready-failed'));
+    });
+
+    it('stops waiting once the init has settled', async () => {
+      const release = deferredWarm();
+      const init = initInstruments({ piano: { id: 'ready-cleared', pitches: ['C/4'] } });
+      release();
+      await init;
+
+      const waiter = watch(instrumentReady('ready-cleared'));
+      await flush();
+
+      expect(waiter.settled).toBe(true);
+    });
   });
 
   describe('gesture-resume', () => {

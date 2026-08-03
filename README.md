@@ -38,7 +38,7 @@ piano.play({
 | `Synth` | Generic subtractive synth. Configurable `waveform`, `filterType`, `filterCutoff`, `envelope`, `harmonics`, `detune`. |
 | `Piano`, `Fountain`, `Random`, `Clap` | Concrete instruments. |
 | `audioContextManager` | Module-level singleton. Lazily creates a unified `AudioContext`, unlocks audio on iOS/Safari. |
-| `initInstruments`, `getInstrument` | Eager page-load init + registry for sampled instruments — see below. |
+| `initInstruments`, `getInstrument`, `instrumentReady` | Eager page-load init + registry for sampled instruments — see below. |
 | `Sequencer` | Multi-voice playback of the shared note schema, with live pause/seek/tempo/mute/loop — see below. |
 | `buildTimeline`, `noteBeats`, `elementBeats` | The schema→events pass the `Sequencer` runs, exposed for analysis. |
 | `MusicalClock` | Beat/ms conversions, optional metronome. |
@@ -81,6 +81,32 @@ constructor options are fixed by the first call for a given `id`.
 `getInstrument(id)` returns the registered instance, or `undefined` if
 nothing was `initInstruments`'d under that id. Plain `new Piano(id)` never
 registers — no behavior change for existing consumers.
+
+### Waiting for an init that is already running
+
+Initialization is asynchronous, so there is a window — page load until the
+last buffer renders — where the instrument is registered but not yet warm.
+`getInstrument` hands it over anyway, and the promise belongs to whoever
+called `initInstruments`. `instrumentReady(id)` is how everyone else waits:
+
+```js
+import { instrumentReady } from 'resound-sound';
+
+playButton.addEventListener('click', async () => {
+  playButton.classList.add('loading');   // only shows if there is a wait
+  const piano = await instrumentReady('main-piano');
+  playButton.classList.remove('loading');
+  sequencer.instrument = piano;
+  sequencer.play();
+});
+```
+
+It resolves immediately when nothing is pending, spans every overlapping init
+for that id (the page-load range warm AND the per-song warm), and resolves
+rather than rejecting when warming failed — an unwarmed sampled instrument
+still plays, it just renders live, so the loader has to clear either way.
+Without it, a tap during warm-up has no choice but to build a second
+instrument and pay for the whole pre-render again.
 
 ## Play a whole score (`Sequencer`)
 

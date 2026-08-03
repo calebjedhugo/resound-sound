@@ -18,6 +18,13 @@ const SAMPLED_INSTRUMENT_TYPES = { piano: Piano };
 // Plain `new Piano(id)` never touches this — only initInstruments registers.
 const registry = new Map();
 
+// id -> promise covering every initialization currently in flight for that id.
+// Construction is synchronous, warming is not, so an instance can be in the
+// registry and still be minutes of pre-rendering away from cheap playback;
+// `instrumentReady(id)` is how a caller that didn't start the init waits for
+// it. Entries are removed once the last one settles, and never reject.
+const pending = new Map();
+
 function sameLayers(a, b) {
   if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
   return a.every((v, i) => v === b[i]);
@@ -49,7 +56,19 @@ async function initOne(Ctor, typeName, cfg = {}) {
   // suspended (page-load, no gesture yet), arm the one-time resume listeners.
   audioContextManager.resumeOnFirstGesture();
 
-  if (pitches.length) await instance.warm(pitches);
+  if (!pitches.length) return instance;
+
+  // Warm right away — Piano.warm() already dedupes renders in flight, so
+  // overlapping calls cost nothing. THIS call still resolves on its own
+  // pitches, but the promise published for waiters also covers any earlier
+  // init still running, so nobody is told the instrument is ready while half
+  // of it is still rendering.
+  const own = instance.warm(pitches);
+  const combined = Promise.all([pending.get(id), own]).then(() => {}, () => {});
+  pending.set(id, combined);
+  combined.then(() => { if (pending.get(id) === combined) pending.delete(id); });
+
+  await own;
   return instance;
 }
 
@@ -76,10 +95,29 @@ export async function initInstruments(config = {}) {
 }
 
 /**
- * Look up a previously `initInstruments()`'d instance by id.
+ * Look up a previously `initInstruments()`'d instance by id. Synchronous, and
+ * says nothing about warming — see `instrumentReady`.
  * @param {string} id
  * @returns {Object|undefined}
  */
 export function getInstrument(id) {
+  return registry.get(id);
+}
+
+/**
+ * Wait for the initialization in flight for `id` — the one `initInstruments`
+ * started, from anywhere in the app — and resolve with the instrument.
+ *
+ * This is what a play button awaits: tapped mid-init it can show a loader and
+ * then use the SAME warmed instance, instead of racing the init with a second
+ * one. Resolves immediately when nothing is pending, and resolves (never
+ * rejects) if the warming failed — an unwarmed sampled instrument still plays,
+ * it just renders live, so a caller's loader must clear either way.
+ *
+ * @param {string} id
+ * @returns {Promise<Object|undefined>} the registered instance, if any
+ */
+export async function instrumentReady(id) {
+  await pending.get(id); // undefined resolves on the spot
   return registry.get(id);
 }

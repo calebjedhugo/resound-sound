@@ -10,6 +10,6 @@ export { default as MusicalClock } from './lib/MusicalClock';
 export { applyEnvelope } from './lib/Envelope';
 export { getFrequency } from './lib/noteFrequencies';
 export { getDuration } from './lib/duration';
-export { initInstruments, getInstrument } from './lib/instrumentRegistry';
+export { initInstruments, getInstrument, instrumentReady } from './lib/instrumentRegistry';
 export { default as Sequencer } from './lib/Sequencer';
 export { buildTimeline, noteBeats, elementBeats } from './lib/timeline';
