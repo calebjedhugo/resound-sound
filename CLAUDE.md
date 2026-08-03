@@ -14,13 +14,14 @@ Published Web Audio package extracted from `resound-fe/src/audio/`. See `README.
     - **`await piano.warm([pitches])`** pre-renders at load — REQUIRED for mobile/dense polyphony to avoid first-hit live spikes.
     - **`new Piano(id, { autoSample: false })`** = pure live (continuous velocity, max fidelity). Also `{ layers, maxCacheEntries }`.
 - `src/lib/` — `AudioContextManager` (singleton), `Envelope`, `MusicalClock`, `duration`, `noteFrequencies`.
+  - `timeline.js` + `Sequencer.js` — schema-native multi-voice playback (`src/SPEC-schema-playback.md`). `buildTimeline()` is the ONE place the shared note schema is interpreted for audio (dotted, tie merging, chords); `Sequencer` runs those events on a 25ms beat-cursor clock with live seek/tempo/mute/loop. **Consumers must never re-implement this in app code** — the same untransformed arrays feed resound-notation's `render()` and this.
 - `src/index.js` — public exports. **NEVER reformat the export block** — the Vite middleware in `src/editor/vite.config.js` parses it with a regex when the editor creates new instruments.
 - `src/editor/` — Vite playground for designing sounds. Plain JS, no React. Excluded from npm tarball.
 
 ## Workflows
 
 ```bash
-npm test            # Jest, 22 integration tests — keep these green, they are the safety net
+npm test            # Jest, 84 integration tests — keep these green, they are the safety net
 npm run build       # webpack ESM bundle + tsc declarations to dist/
 npm start           # webpack-watch + tsc-watch + editor on http://localhost:5174
 ```

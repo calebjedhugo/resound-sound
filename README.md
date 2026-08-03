@@ -39,6 +39,8 @@ piano.play({
 | `Piano`, `Fountain`, `Random`, `Clap` | Concrete instruments. |
 | `audioContextManager` | Module-level singleton. Lazily creates a unified `AudioContext`, unlocks audio on iOS/Safari. |
 | `initInstruments`, `getInstrument` | Eager page-load init + registry for sampled instruments — see below. |
+| `Sequencer` | Multi-voice playback of the shared note schema, with live pause/seek/tempo/mute/loop — see below. |
+| `buildTimeline`, `noteBeats`, `elementBeats` | The schema→events pass the `Sequencer` runs, exposed for analysis. |
 | `MusicalClock` | Beat/ms conversions, optional metronome. |
 | `applyEnvelope`, `getFrequency`, `getDuration` | Building-block helpers. |
 
@@ -79,6 +81,47 @@ constructor options are fixed by the first call for a given `id`.
 `getInstrument(id)` returns the registered instance, or `undefined` if
 nothing was `initInstruments`'d under that id. Plain `new Piano(id)` never
 registers — no behavior change for existing consumers.
+
+## Play a whole score (`Sequencer`)
+
+`Instrument.play()` plays one voice, start to finish, with no live control.
+`Sequencer` plays a whole multi-voice score off one beat clock — and it reads
+the note arrays as they are, the same objects you hand to
+[resound-notation](https://github.com/calebjedhugo/resound-notation)'s
+`render()`. Dotted values, tie chains and chords are interpreted here, so an
+app never needs its own translation layer. Extra keys (`lyric`,
+`timeSignature`, `pickupBeats`, …) are ignored.
+
+```js
+import { Sequencer, getInstrument } from 'resound-sound';
+
+const seq = new Sequencer({
+  instrument: getInstrument('main-piano'),
+  // dynamic scales with how many voices are singing
+  velocity: ({ activeVoices }) => [0.95, 0.8, 0.65, 0.5][activeVoices - 1],
+});
+
+seq.load(song);        // { voices: [{ id, notes }], tempo, tempoMap, basis }
+await seq.warm();      // pre-render every pitch the song uses
+seq.onTick = (beat) => cursor.moveTo(beat);   // notated beats — data-beat units
+seq.onEnd = () => ui.setPlaying(false);
+seq.play();
+```
+
+Everything below takes effect on the next 25ms tick, mid-phrase:
+
+```js
+seq.pause(); seq.play();          // resume where it stopped
+seq.seek(32);                     // beats
+seq.setTempo(76);                 // BPM of the `basis` note
+seq.toggleMute('alto');           // per-voice; returns the new sounding state
+seq.setLoop(16, 32); seq.clearLoop();
+```
+
+`tempoMap: [{ beat, multiplier }]` applies rits and accels; `basis` (default 4)
+decides what a beat is, exactly as in `getDuration()`. See
+[src/SPEC-schema-playback.md](src/SPEC-schema-playback.md) for the full
+contract, including tie and chord semantics.
 
 ## Authoring new sounds
 
