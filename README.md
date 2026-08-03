@@ -138,7 +138,7 @@ The playground opens at `http://localhost:5174/`. Tune the `Synth` envelope, wav
 ## Develop
 
 ```bash
-npm test           # Jest, 22 integration tests
+npm test           # Jest, 84 integration tests
 npm run build      # Webpack ESM bundle + tsc declarations to dist/
 npm start          # Webpack watch + tsc watch + editor dev server
 ```

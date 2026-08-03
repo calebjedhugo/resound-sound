@@ -106,5 +106,3 @@ export function buildTimeline(song) {
   const pitches = [...new Set(events.map((event) => event.pitch))];
   return { events, totalBeats, pitches };
 }
-
-export default buildTimeline;

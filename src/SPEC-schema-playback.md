@@ -110,7 +110,7 @@ convention, so a note's milliseconds match on either path.
 | `onTick(beat)` | after every tick and every seek |
 | `onEnd()` | once, when the cursor passes `totalBeats + tailBeats` |
 | `pitches()` | unique pitches in the loaded song (for `warm()`) |
-| `beat`, `playing`, `totalBeats`, `startBeat` | read-only state |
+| `beat`, `playing`, `totalBeats`, `startBeat`, `loopStart`, `loopEnd`, `looping` | read-only state |
 
 `startBeat` is the first sounding onset in the song, so `stop()` on a piece
 that opens with rests parks on the first note rather than on silence.

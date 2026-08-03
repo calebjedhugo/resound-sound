@@ -14,6 +14,7 @@ Published Web Audio package extracted from `resound-fe/src/audio/`. See `README.
     - **`await piano.warm([pitches])`** pre-renders at load — REQUIRED for mobile/dense polyphony to avoid first-hit live spikes.
     - **`new Piano(id, { autoSample: false })`** = pure live (continuous velocity, max fidelity). Also `{ layers, maxCacheEntries }`.
 - `src/lib/` — `AudioContextManager` (singleton), `Envelope`, `MusicalClock`, `duration`, `noteFrequencies`.
+  - `instrumentRegistry.js` — `initInstruments()` / `getInstrument()`: eager page-load construction + warm of sampled instruments, registered by id (`SPEC-init.md`).
   - `timeline.js` + `Sequencer.js` — schema-native multi-voice playback (`src/SPEC-schema-playback.md`). `buildTimeline()` is the ONE place the shared note schema is interpreted for audio (dotted, tie merging, chords); `Sequencer` runs those events on a 25ms beat-cursor clock with live seek/tempo/mute/loop. **Consumers must never re-implement this in app code** — the same untransformed arrays feed resound-notation's `render()` and this.
 - `src/index.js` — public exports. **NEVER reformat the export block** — the Vite middleware in `src/editor/vite.config.js` parses it with a regex when the editor creates new instruments.
 - `src/editor/` — Vite playground for designing sounds. Plain JS, no React. Excluded from npm tarball.
@@ -51,7 +52,7 @@ Editor only knows the synth topology. Noise-based instruments (Clap-style) still
 
 - **NEVER rename `babel.config.cjs` or `webpack.config.cjs` to `.js`** — `package.json` sets `"type": "module"`, so config files must stay `.cjs`.
 - **NEVER "fix" the `Instrument.pause()` quirk.** It does not interrupt an in-flight `setTimeout` sleep, so the next scheduled note plays before the loop honors `shouldStop`. The Piano pause test pins `currentIndex=2` after pausing mid-note-0 of a 3-note phrase. Established behavior — locked in by the test.
-- **IMPORTANT: `AudioContextManager` is a module-level singleton.** Two copies of `resound-sound` in a consumer's `node_modules` tree gives two AudioContexts and timing weirdness. After linking, verify with `npm ls resound-sound` in the consumer.
+- **IMPORTANT: `AudioContextManager` and the `instrumentRegistry` are module-level singletons.** Two copies of `resound-sound` in a consumer's `node_modules` tree gives two AudioContexts (timing weirdness) and two registries (`getInstrument` returns `undefined` for an id the other copy registered). After linking, verify with `npm ls resound-sound` in the consumer.
 - **IMPORTANT: Consumers using jest need `transformIgnorePatterns: ['/node_modules/(?!(resound-sound)/)']`** — the published bundle is ESM and babel-jest skips `node_modules` by default.
 - **Vite 4, not 5.** Vite 5 requires Node 18+; user is on Node 16. Matches resound-fe.
 - **`Instrument.play()` with `data: []` crashes** at `playSchedule[playSchedule.length - 1].duration`. Known bug, out of scope for v0.1.x.
@@ -59,3 +60,5 @@ Editor only knows the synth topology. Noise-based instruments (Clap-style) still
 ## Consumer
 
 `resound-fe` (`~/Development/personal dev work.nosync/resound-fe/`) imports from this package. Six files: `core/{PlaybackManager,ClapManager,GameState}.js`, `entities/{Creature,Fountain}.js`, `createEventListeners.js`. Full suite is 1150 / 66 — keep it green when bumping the package.
+
+`singHarmony2` (`~/Development/personal dev work.nosync/singHarmony2/`) drove `initInstruments` and `Sequencer`, and consumes this package as a local `file:` link pending the next publish. It has no test suite of its own — verification is browser-driven, so breaking changes surface only there.
