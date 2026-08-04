@@ -62,6 +62,23 @@ const smoothstep = (a, b, x) => {
   return t * t * (3 - 2 * t);
 };
 
+/**
+ * Loudness of a strike at velocity `v` (0-1). buildVoices() normalizes the live
+ * voices to this, and playSampledNote() divides the layer's value back out to
+ * recover continuous loudness from a layered buffer — the two MUST agree, so
+ * they read the curve from here rather than each spelling it out.
+ */
+const velocityGain = (v) => 0.5 + 0.7 * v;
+
+/** The OfflineAudioContext constructor, or null where the env has none. */
+function offlineAudioContextCtor() {
+  if (typeof OfflineAudioContext !== 'undefined') return OfflineAudioContext;
+  if (typeof window !== 'undefined' && window.OfflineAudioContext) {
+    return window.OfflineAudioContext;
+  }
+  return null;
+}
+
 function mulberry32(seed) {
   let a = seed >>> 0;
   return () => {
@@ -160,8 +177,7 @@ class Piano extends Instrument {
   }
 
   static offlineAvailable() {
-    return typeof OfflineAudioContext !== 'undefined'
-      || (typeof window !== 'undefined' && !!window.OfflineAudioContext);
+    return offlineAudioContextCtor() !== null;
   }
 
   /**
@@ -245,9 +261,8 @@ class Piano extends Instrument {
     });
 
     // Normalize on the steady (body) level; louder for harder strikes.
-    const velGain = 0.5 + 0.7 * v;
     const ss = Math.sqrt(voices.reduce((s, vc) => s + vc.peak * vc.peak, 0));
-    const g = (NORM * velGain) / Math.max(0.8, ss);
+    const g = (NORM * velocityGain(v)) / Math.max(0.8, ss);
     voices.forEach((vc) => { vc.peak *= g; vc.knee *= g; });
     return voices;
   }
@@ -375,8 +390,8 @@ class Piano extends Instrument {
     const durSec = Math.max(0.02, duration / 1000);
 
     // Continuous loudness despite layered timbre: trim to the exact velocity.
-    const layerGain = 0.5 + 0.7 * this.velocityLayers[layerIndex];
-    const base = this.volumeMultiplier * ((0.5 + 0.7 * velocity) / layerGain);
+    const layerGain = velocityGain(this.velocityLayers[layerIndex]);
+    const base = this.volumeMultiplier * (velocityGain(velocity) / layerGain);
 
     const gain = this.context.createGain();
     gain.gain.setValueAtTime(base, t0);
@@ -424,9 +439,7 @@ class Piano extends Instrument {
   renderBuffer(f0, layerVel) {
     const sr = this.context.sampleRate;
     const seconds = this.bufferSeconds(f0);
-    const OfflineCtor = typeof OfflineAudioContext !== 'undefined'
-      ? OfflineAudioContext
-      : (typeof window !== 'undefined' ? window.OfflineAudioContext : null);
+    const OfflineCtor = offlineAudioContextCtor();
     if (!OfflineCtor) return Promise.reject(new Error('OfflineAudioContext unavailable'));
 
     const ctx = new OfflineCtor(1, Math.max(1, Math.ceil(seconds * sr)), sr);

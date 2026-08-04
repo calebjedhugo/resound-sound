@@ -7,8 +7,8 @@ import Instrument from './Instrument';
  * Uses harmonic series, shimmer effect, and gentle envelope
  */
 class Fountain extends Instrument {
-  constructor(id = 'fountain', recordingCallback = null) {
-    super(id, recordingCallback);
+  constructor(id = 'fountain') {
+    super(id);
 
     // Ethereal envelope - gentle attack, long sustain, slow release
     this.envelope = {

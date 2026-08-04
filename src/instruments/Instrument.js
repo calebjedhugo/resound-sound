@@ -10,6 +10,28 @@ function sleep(ms) {
   });
 }
 
+/** A note sounds only if it carries a pitch; anything else is a rest. */
+function isPitched(note) {
+  return Boolean(note && note.pitch);
+}
+
+/**
+ * Emit one note event to the instrument's `noteCallback` (recording, listening,
+ * spatial audio). No-op when nobody is listening or the note is a rest.
+ * @param {Instrument} instrument
+ * @param {Object} note
+ */
+function emitNoteEvent(instrument, note) {
+  if (!instrument.noteCallback || !isPitched(note)) return;
+  instrument.noteCallback({
+    pitch: note.pitch,
+    length: note.length,
+    timestamp: Date.now(),
+    source: instrument.id,
+    sourcePosition: instrument.sourcePosition,
+  });
+}
+
 /**
  * Base class for all instruments
  * Handles playback state, pause/resume, and oscillator tracking
@@ -27,6 +49,7 @@ class Instrument {
       isPlaying: false,
       isPaused: false,
       shouldStop: false, // Flag to interrupt play loop
+      isStopping: false, // The pending interrupt came from stop(), not pause()
       currentData: null, // Song data array
       currentIndex: 0, // Which note/chord we're on
       tempo: 120,
@@ -56,13 +79,16 @@ class Instrument {
     // If already playing, ignore
     if (this.playbackState.isPlaying) return;
 
+    const elements = Array.isArray(data) ? data : [];
+
     // Store playback parameters
-    this.playbackState.currentData = data;
+    this.playbackState.currentData = elements;
     this.playbackState.tempo = tempo;
     this.playbackState.basis = basis;
     this.playbackState.isPlaying = true;
     this.playbackState.isPaused = false;
     this.playbackState.shouldStop = false;
+    this.playbackState.isStopping = false;
 
     // Start from beginning (or resume from saved position if resuming)
     const startIndex = this.playbackState.currentIndex;
@@ -71,8 +97,8 @@ class Instrument {
     const playSchedule = [];
     let naturalTime = 0; // Natural position based on cumulative durations
 
-    for (let i = 0; i < data.length; i += 1) {
-      const element = data[i];
+    for (let i = 0; i < elements.length; i += 1) {
+      const element = elements[i];
       const offset = this.getElementOffset(element);
       const duration = this.getElementDuration(element, tempo, basis);
 
@@ -89,12 +115,17 @@ class Instrument {
     let elapsedTime = 0;
 
     for (let i = startIndex; i < playSchedule.length; i += 1) {
-      // Check if we should stop (pause was called)
+      // Check if we should stop (pause or stop was called)
       if (this.playbackState.shouldStop) {
-        this.playbackState.currentIndex = i; // Save position
-        this.playbackState.isPlaying = false;
-        this.playbackState.isPaused = true;
         this.playbackState.shouldStop = false;
+        this.playbackState.isPlaying = false;
+        if (this.playbackState.isStopping) {
+          // stop() already cleared the state — don't resurrect it as a pause.
+          this.playbackState.isStopping = false;
+        } else {
+          this.playbackState.currentIndex = i; // Save position for resume()
+          this.playbackState.isPaused = true;
+        }
         return;
       }
 
@@ -119,9 +150,10 @@ class Instrument {
       }
     }
 
-    // Wait for the last note to finish before resetting state
-    const lastNoteDuration = playSchedule[playSchedule.length - 1].duration;
-    await sleep(lastNoteDuration);
+    // Wait for the last note to finish before resetting state. An empty phrase
+    // has nothing to wait for (and no last entry to read a duration from).
+    const lastScheduled = playSchedule[playSchedule.length - 1];
+    if (lastScheduled) await sleep(lastScheduled.duration);
 
     // Finished playing - reset state
     this.playbackState.isPlaying = false;
@@ -170,24 +202,10 @@ class Instrument {
    * @param {number} basis - Beat note (4 = quarter note)
    */
   playNoteImmediate(note, tempo, basis) {
+    if (!isPitched(note)) return; // REST
+
     const duration = getDuration(note.length, tempo, basis);
-
-    // Check for REST
-    if (!note.pitch || note.pitch === undefined || note.pitch === null) {
-      return;
-    }
-
-    // Emit note event to callback (for recording, listening, etc.)
-    if (this.noteCallback) {
-      const noteEvent = {
-        pitch: note.pitch,
-        length: note.length,
-        timestamp: Date.now(),
-        source: this.id,
-        sourcePosition: this.sourcePosition,
-      };
-      this.noteCallback(noteEvent);
-    }
+    emitNoteEvent(this, note);
 
     // Create and play note (Web Audio schedules it). velocity (0-1) is optional
     // and only meaningful to instruments that model it (e.g. Piano).
@@ -203,27 +221,13 @@ class Instrument {
   playChordImmediate(notes, tempo, basis) {
     const durations = notes.map((note) => getDuration(note.length, tempo, basis));
 
-    // Emit note events to callback (for recording, listening, etc.)
-    if (this.noteCallback) {
-      notes.forEach((note) => {
-        if (note.pitch && note.pitch !== undefined && note.pitch !== null) {
-          const noteEvent = {
-            pitch: note.pitch,
-            length: note.length,
-            timestamp: Date.now(),
-            source: this.id,
-            sourcePosition: this.sourcePosition,
-          };
-          this.noteCallback(noteEvent);
-        }
-      });
-    }
+    // Every event is emitted before any note starts, so a listener sees the
+    // whole chord as one simultaneity.
+    notes.forEach((note) => emitNoteEvent(this, note));
 
     // Start all notes (Web Audio schedules them)
     notes.forEach((note, i) => {
-      if (note.pitch && note.pitch !== undefined && note.pitch !== null) {
-        this.startNote(note.pitch, durations[i], note.velocity);
-      }
+      if (isPitched(note)) this.startNote(note.pitch, durations[i], note.velocity);
     });
   }
 
@@ -245,7 +249,7 @@ class Instrument {
    * Resume playback from paused position
    */
   async resume() {
-    if (!this.playbackState.isPaused) return;
+    if (!this.playbackState.isPaused || !this.playbackState.currentData) return;
 
     // Continue playing from saved position
     await this.play({
@@ -256,10 +260,13 @@ class Instrument {
   }
 
   /**
-   * Stop playback completely and reset
+   * Stop playback completely and reset.
+   * `isStopping` tells a play loop still sleeping on a note that this interrupt
+   * is a stop, so it exits without parking the state as a pause.
    */
   stop() {
     this.playbackState.shouldStop = true;
+    this.playbackState.isStopping = true;
     this.playbackState.isPlaying = false;
     this.playbackState.isPaused = false;
     this.playbackState.currentIndex = 0;
@@ -297,31 +304,12 @@ class Instrument {
   }
 
   /**
-   * Play a single note
+   * Play a single note and wait for it to finish.
+   * The blocking counterpart of playNoteImmediate().
    */
   async playNote(note, tempo, basis) {
     const duration = getDuration(note.length, tempo, basis);
-
-    // Check for REST
-    if (!note.pitch || note.pitch === undefined || note.pitch === null) {
-      await sleep(duration);
-      return;
-    }
-
-    // Emit note event to callback (for recording, listening, etc.)
-    if (this.noteCallback) {
-      const noteEvent = {
-        pitch: note.pitch,
-        length: note.length,
-        timestamp: Date.now(),
-        source: this.id,
-        sourcePosition: this.sourcePosition,
-      };
-      this.noteCallback(noteEvent);
-    }
-
-    // Create and play note
-    this.startNote(note.pitch, duration, note.velocity);
+    this.playNoteImmediate(note, tempo, basis);
     await sleep(duration);
   }
 
@@ -330,33 +318,10 @@ class Instrument {
    * Waits for SHORTEST note, then continues (allows bass sustain)
    */
   async playChord(notes, tempo, basis) {
-    const durations = notes.map((note) => getDuration(note.length, tempo, basis));
-    const shortestDuration = Math.min(...durations);
-
-    // Emit note events to callback (for recording, listening, etc.)
-    if (this.noteCallback) {
-      notes.forEach((note) => {
-        if (note.pitch && note.pitch !== undefined && note.pitch !== null) {
-          const noteEvent = {
-            pitch: note.pitch,
-            length: note.length,
-            timestamp: Date.now(),
-            source: this.id,
-            sourcePosition: this.sourcePosition,
-          };
-          this.noteCallback(noteEvent);
-        }
-      });
-    }
-
-    // Start all notes (they clean themselves up)
-    notes.forEach((note, i) => {
-      if (note.pitch && note.pitch !== undefined && note.pitch !== null) {
-        this.startNote(note.pitch, durations[i], note.velocity);
-      }
-    });
-
-    // Wait for shortest note, then continue
+    const shortestDuration = Math.min(
+      ...notes.map((note) => getDuration(note.length, tempo, basis)),
+    );
+    this.playChordImmediate(notes, tempo, basis);
     await sleep(shortestDuration);
   }
 
@@ -385,11 +350,13 @@ class Instrument {
   /**
    * Start a note (creates oscillator with instrument's timbre)
    * MUST be implemented by subclass
-   * @param {string|number} pitch - Note pitch (e.g., 'C4') or frequency
+   * @param {string|number} pitch - Note pitch (e.g., 'C/4') or frequency in Hz
    * @param {number} duration - Duration in milliseconds
+   * @param {number} [velocity] - Strike velocity 0-1; only instruments that
+   *   model it (e.g. Piano) do anything with it
    */
   // eslint-disable-next-line class-methods-use-this, no-unused-vars
-  startNote(pitch, duration) {
+  startNote(pitch, duration, velocity) {
     throw new Error('startNote() must be implemented by subclass');
   }
 

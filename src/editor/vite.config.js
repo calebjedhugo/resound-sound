@@ -14,8 +14,8 @@ const buildInstrumentSource = ({ name, envelope, harmonics, detune, waveform, fi
   `import Synth from './Synth';
 
 class ${name} extends Synth {
-  constructor(id = '${name.toLowerCase()}', recordingCallback = null) {
-    super(id, recordingCallback);
+  constructor(id = '${name.toLowerCase()}') {
+    super(id);
     this.envelope = ${JSON.stringify(envelope)};
     this.harmonics = ${JSON.stringify(harmonics)};
     this.detune = ${JSON.stringify(detune)};

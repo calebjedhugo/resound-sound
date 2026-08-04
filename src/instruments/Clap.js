@@ -6,8 +6,8 @@ import Instrument from './Instrument';
  * Uses filtered white noise with sharp envelope to simulate hands clapping
  */
 class Clap extends Instrument {
-  constructor(id = 'clap', recordingCallback = null) {
-    super(id, recordingCallback);
+  constructor(id = 'clap') {
+    super(id);
 
     // Clap characteristics - very short, percussive
     this.envelope = {

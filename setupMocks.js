@@ -10,6 +10,9 @@ class MockGainNode {
       setValueAtTime: jest.fn(),
       linearRampToValueAtTime: jest.fn(),
       exponentialRampToValueAtTime: jest.fn(),
+      // Instrument.stopAll() calls this first, inside a try/catch. Without it
+      // the whole fade-out silently became a no-op under test.
+      cancelScheduledValues: jest.fn(),
     };
   }
 

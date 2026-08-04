@@ -247,6 +247,17 @@ class Sequencer {
     const dt = (now - this._lastNow) / 1000;
     this._lastNow = now;
 
+    // A loop set (or a seek made) mid-playback can leave the cursor PAST the
+    // loop, where the wrap below can never trigger — the cursor would then run
+    // on past the end of the song forever, silent and never reaching onEnd.
+    // Snap it back, as play() does. A cursor sitting BEFORE the loop is left
+    // alone: it plays the lead-in and enters the loop at loopEnd on its own.
+    if (this.looping && this.beat >= this.loopEnd - EPS) {
+      this.beat = this.loopStart;
+      this._cursor = this._indexAt(this.beat);
+      this._fireAt(this.beat);
+    }
+
     const from = this.beat;
     let to = from + dt / this.secondsPerBeat(from);
     const wrapping = this.looping && from < this.loopEnd && to >= this.loopEnd - EPS;

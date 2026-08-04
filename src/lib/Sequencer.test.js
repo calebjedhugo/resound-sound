@@ -240,6 +240,39 @@ describe('Sequencer', () => {
     expect(piano.calls.every((c) => c.pitch === 'C4')).toBe(true);
   });
 
+  it('pulls the cursor into a loop set behind the playhead', () => {
+    // Setting an A-B loop over a passage already gone by is ordinary practice
+    // ("play that bit again"). Without the snap-in the wrap can never trigger,
+    // and the cursor runs past the end of the song forever, silent.
+    const piano = new StubInstrument();
+    const seq = makeSeq({ instrument: piano });
+    seq.play(SCALE);
+    step(1600); // well past beat 1
+    expect(seq.beat).toBeGreaterThan(1);
+
+    seq.setLoop(0, 1);
+    step(500);
+
+    expect(seq.beat).toBeLessThan(1);
+    expect(seq.playing).toBe(true);
+    expect(piano.calls.filter((c) => c.pitch === 'C4').length).toBeGreaterThan(1);
+  });
+
+  it('plays the lead-in when the cursor sits before the loop', () => {
+    // The counterpart of the snap-in above: a cursor BEFORE the loop is left
+    // alone, so a lead-in still sounds and the loop is entered at loopEnd.
+    // (play() itself snaps in from either side; this is the mid-play case.)
+    const piano = new StubInstrument();
+    const seq = makeSeq({ instrument: piano });
+    seq.play(SCALE);
+    seq.setLoop(1, 2);
+
+    step(500);
+    expect(piano.calls.map((c) => c.pitch)).toEqual(['C4', 'D4']); // lead-in sounded
+    step(500);
+    expect(piano.calls.map((c) => c.pitch)).toEqual(['C4', 'D4', 'D4']); // wrapped
+  });
+
   it('clears a loop given a non-positive range', () => {
     const seq = makeSeq({ instrument: new StubInstrument() });
     seq.load(SCALE);

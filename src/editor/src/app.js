@@ -234,6 +234,11 @@ const buildCreatePanel = () => {
   ]);
 };
 
+// render() rebuilds the whole page, so the previous scope's draw loop has to be
+// cancelled — otherwise every instrument switch leaves another rAF loop running
+// forever against a canvas that is no longer on the page.
+let waveformFrame = null;
+
 const buildWaveform = () => {
   const ctx = audioContextManager.getContext();
   const analyser = ctx.createAnalyser();
@@ -242,6 +247,7 @@ const buildWaveform = () => {
   const canvas = h('canvas', { class: 'waveform', width: 480, height: 140 });
   const c2d = canvas.getContext('2d');
   const buffer = new Uint8Array(analyser.fftSize);
+  if (waveformFrame !== null) cancelAnimationFrame(waveformFrame);
   const draw = () => {
     analyser.getByteTimeDomainData(buffer);
     c2d.fillStyle = '#0b1d12';
@@ -256,7 +262,7 @@ const buildWaveform = () => {
       else c2d.lineTo(i * slice, y);
     }
     c2d.stroke();
-    requestAnimationFrame(draw);
+    waveformFrame = requestAnimationFrame(draw);
   };
   draw();
   return h('section', { class: 'panel' }, [h('h2', {}, 'Waveform'), canvas]);

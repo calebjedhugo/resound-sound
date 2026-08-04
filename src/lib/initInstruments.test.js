@@ -78,6 +78,19 @@ describe('initInstruments / getInstrument', () => {
     expect(getContextSpy).not.toHaveBeenCalled();
   });
 
+  it('warns instead of silently doing nothing when the config is unusable', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    // No id: nothing to register under, so the call cannot do anything.
+    await initInstruments({ piano: { pitches: ['C/4'] } });
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+
+    // Unknown type: a typo would otherwise be dropped without a trace.
+    await initInstruments({ pianoo: { id: 'typo', pitches: ['C/4'] } });
+    expect(warnSpy).toHaveBeenCalledTimes(2);
+    expect(getInstrument('typo')).toBeUndefined();
+  });
+
   it('does not register a plain `new Piano(id)` instance', () => {
     // eslint-disable-next-line no-new
     new Piano('not-registered-directly');

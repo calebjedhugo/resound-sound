@@ -70,23 +70,58 @@ const noteFrequencies = {
   'B/5': 987.77,
 };
 
+const A4_HZ = 440;
+const A4_MIDI = 69;
+// Semitones above C for each natural.
+const NATURAL_SEMITONES = {
+  C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11,
+};
+// 'C/4' (schema form) and 'C4' (shorthand), sharp or flat, any octave.
+const PITCH_PATTERN = /^([A-G])([#b]?)\/?(-?\d+)$/;
+
 /**
- * Convert note name to frequency in Hz
- * @param {string|number} pitch - Note name (e.g., 'C4', 'C#4') or frequency number
+ * Table lookup that only ever yields a number — a plain object lookup would
+ * happily hand back `Object.prototype.constructor` for a note spelled
+ * `"constructor"` in a malformed song file, and that NaNs its way into a
+ * Web Audio exception instead of the graceful A4 fallback.
+ */
+function tabledFrequency(key) {
+  const value = noteFrequencies[key];
+  return typeof value === 'number' ? value : undefined;
+}
+
+/**
+ * Convert note name to frequency in Hz.
+ *
+ * The table above is authoritative for the range it covers (C/2–B/5); anything
+ * outside it — a descant above B/5, a pedal below C/2 — is computed in equal
+ * temperament rather than collapsing to A4, which used to make every such note
+ * sound the same wrong pitch.
+ *
+ * @param {string|number} pitch - Note name ('C/4' or 'C4'; '#'/'b' accidentals)
+ *   or a frequency in Hz, which is returned unchanged
  * @returns {number} Frequency in Hz
  */
 export function getFrequency(pitch) {
   if (typeof pitch === 'number') return pitch;
-  if (noteFrequencies[pitch]) return noteFrequencies[pitch];
 
-  // Try simple conversion for notes like C4, D4, etc.
-  const match = pitch.match(/^([A-G][#b]?)(\d)$/);
-  if (match) {
-    const [, note, octave] = match;
-    const key = `${note}/${octave}`;
-    if (noteFrequencies[key]) return noteFrequencies[key];
+  if (typeof pitch === 'string') {
+    const exact = tabledFrequency(pitch);
+    if (exact !== undefined) return exact;
+
+    const match = pitch.match(PITCH_PATTERN);
+    if (match) {
+      const [, letter, accidental, octave] = match;
+      // Shorthand ('C4') still gets the table's measured value when in range.
+      const tabled = tabledFrequency(`${letter}${accidental}/${octave}`);
+      if (tabled !== undefined) return tabled;
+
+      const alteration = (accidental === '#' ? 1 : 0) - (accidental === 'b' ? 1 : 0);
+      const midi = (Number(octave) + 1) * 12 + NATURAL_SEMITONES[letter] + alteration;
+      return A4_HZ * 2 ** ((midi - A4_MIDI) / 12);
+    }
   }
 
-  console.warn(`Unknown pitch: ${pitch}, using A4 (440 Hz)`);
-  return 440;
+  console.warn(`Unknown pitch: ${pitch}, using A4 (${A4_HZ} Hz)`);
+  return A4_HZ;
 }

@@ -64,7 +64,10 @@ export function buildTimeline(song) {
         if (!warnedUnsupported) {
           warnedUnsupported = true;
           // eslint-disable-next-line no-console
-          console.warn('resound-sound: tuplets and grace notes are not played yet; skipping.');
+          console.warn(
+            'resound-sound: tuplets and grace notes are not interpreted yet — '
+            + 'their notes sound at face value.',
+          );
         }
       }
       const members = Array.isArray(element) ? element : [element];

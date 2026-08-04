@@ -33,12 +33,18 @@ function sameLayers(a, b) {
 /**
  * Create (or reuse) one configured instrument and warm its pitches.
  * @param {Function} Ctor - instrument class, e.g. Piano
- * @param {string} typeName - config key, used only for the conflict warning
+ * @param {string} typeName - config key, used only in warning messages
  * @param {Object} cfg - { id, pitches, ...constructorOptions }
  */
 async function initOne(Ctor, typeName, cfg = {}) {
   const { id, pitches = [], ...options } = cfg;
-  if (!id) return undefined;
+  if (!id) {
+    // Without an id there is nothing to register under, so the whole call would
+    // do nothing at all — and `getInstrument` would return undefined forever.
+    // eslint-disable-next-line no-console
+    console.warn(`initInstruments: '${typeName}' config has no 'id'; skipping it.`);
+    return undefined;
+  }
 
   let instance = registry.get(id);
   if (!instance) {
@@ -82,9 +88,19 @@ async function initOne(Ctor, typeName, cfg = {}) {
  *   completes; callers may ignore the promise for fire-and-forget.
  */
 export async function initInstruments(config = {}) {
-  const entries = Object.entries(config).filter(
-    ([type, cfg]) => SAMPLED_INSTRUMENT_TYPES[type] && cfg,
-  );
+  const entries = Object.entries(config).filter(([type, cfg]) => {
+    if (!SAMPLED_INSTRUMENT_TYPES[type]) {
+      // A typo'd or not-yet-supported type would otherwise be dropped in
+      // silence, leaving the consumer with an instrument that never warms.
+      // eslint-disable-next-line no-console
+      console.warn(
+        `initInstruments: no sampled instrument type '${type}' `
+        + `(known: ${Object.keys(SAMPLED_INSTRUMENT_TYPES).join(', ')}); skipping it.`,
+      );
+      return false;
+    }
+    return Boolean(cfg);
+  });
   if (entries.length === 0) return {};
 
   const result = {};

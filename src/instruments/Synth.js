@@ -12,8 +12,8 @@ import Instrument from './Instrument';
  * Subclass and override the defaults in your constructor to ship a new sound.
  */
 class Synth extends Instrument {
-  constructor(id = 'synth', recordingCallback = null) {
-    super(id, recordingCallback);
+  constructor(id = 'synth') {
+    super(id);
 
     this.envelope = { attack: 0.01, decay: 0.1, sustain: 0.5, release: 0.2 };
     this.harmonics = [];
