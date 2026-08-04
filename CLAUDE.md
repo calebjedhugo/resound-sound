@@ -60,6 +60,6 @@ Editor only knows the synth topology. Noise-based instruments (Clap-style) still
 
 ## Consumer
 
-`resound-fe` (`~/Development/personal dev work.nosync/resound-fe/`) imports from this package. Six files: `core/{PlaybackManager,ClapManager,GameState}.js`, `entities/{Creature,Fountain}.js`, `createEventListeners.js`. Full suite is 1150 / 66 — keep it green when bumping the package.
+`resound-fe` (`~/Development/personal dev work.nosync/resound-fe/`) imports from this package. Six files: `core/{PlaybackManager,ClapManager,GameState}.js`, `entities/{Creature,Fountain}.js`, `createEventListeners.js`. Full suite is 907 tests / 46 suites — keep it green when bumping the package. Verified 2026-08-03 against this repo's `main` via a temporary `file:` link: green, but it needed two mock methods the 0.2.0 Piano uses (`createWaveShaper`, `setPeriodicWave`) that resound-fe's own `helpers/mocks.js` predates. Expect a consumer's Web Audio mock to be the first thing an instrument change breaks.
 
 `singHarmony2` (`~/Development/personal dev work.nosync/singHarmony2/`) drove `initInstruments` and `Sequencer`, and consumes this package as a local `file:` link pending the next publish. Its `src/player.js` is a thin adapter over `Sequencer`; it tests that adapter (`player.test.js`) and runs every song through `buildTimeline` (`songs.render.test.js`), but the audio itself is verified in the browser.
