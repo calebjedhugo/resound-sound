@@ -34,7 +34,7 @@ piano.play({
 
 | Export | What it is |
 |---|---|
-| `Instrument` | Base class. Subclass and implement `startNote(pitch, duration)` to ship a custom timbre. |
+| `Instrument` | Base class. Subclass and implement `startNote(pitch, duration, velocity?)` to ship a custom timbre. |
 | `Synth` | Generic subtractive synth. Configurable `waveform`, `filterType`, `filterCutoff`, `envelope`, `harmonics`, `detune`. |
 | `Piano`, `Fountain`, `Random`, `Clap` | Concrete instruments. |
 | `audioContextManager` | Module-level singleton. Lazily creates a unified `AudioContext`, unlocks audio on iOS/Safari. |
@@ -164,7 +164,7 @@ The playground opens at `http://localhost:5174/`. Tune the `Synth` envelope, wav
 ## Develop
 
 ```bash
-npm test           # Jest, 84 integration tests
+npm test           # Jest, 111 integration tests
 npm run build      # Webpack ESM bundle + tsc declarations to dist/
 npm start          # Webpack watch + tsc watch + editor dev server
 ```

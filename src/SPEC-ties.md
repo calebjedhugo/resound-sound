@@ -223,7 +223,11 @@ If tied notes have `offset` values, the offset applies to timing/scheduling only
 
 ## File Structure
 
-Modifications to `Instrument.js` -- no new files needed.
+Implemented in `src/lib/timeline.js` — `buildTimeline()` merges tie runs while
+flattening the schema, so the `Sequencer` path gets ties for free. It is
+deliberately NOT in `Instrument.js`: schema interpretation lives in exactly one
+place (see CLAUDE.md), and `Instrument.play()` remains the plain
+one-note-per-element path with no tie handling.
 
 ---
 

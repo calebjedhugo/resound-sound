@@ -1,9 +1,11 @@
 # SPEC: Schema-native multi-voice playback
 
-Status: implementing. Consumer: singHarmony2 — its `src/player.js` walks the
-song JSON itself (tie merging, dotted math, its own multi-voice beat clock
-calling `piano.startNote`). That app-side interpretation is the thing this
-spec deletes.
+Status: **implemented** — `src/lib/timeline.js` + `src/lib/Sequencer.js`, covered
+by `timeline.test.js` and `Sequencer.test.js`, exported from `src/index.js`.
+Consumer: singHarmony2, whose `src/player.js` used to walk the song JSON itself
+(tie merging, dotted math, its own multi-voice beat clock calling
+`piano.startNote`) and is now a thin adapter over `Sequencer`. That app-side
+interpretation is the thing this spec deleted.
 
 > **Related:** [SPEC-ties.md](./SPEC-ties.md) (tie semantics — implemented here
 > for the schema path) · [SPEC-init.md](../SPEC-init.md) (eager warm-up)
@@ -106,7 +108,7 @@ convention, so a note's milliseconds match on either path.
 | `seek(beat)` | clamp to `[0, totalBeats]`, fire `onTick`; safe while playing |
 | `setTempo(bpm)` | takes effect on the next tick; no restart |
 | `mute(id)` / `unmute(id)` / `toggleMute(id)` / `setMuted(iterable)` | muted voices fire no notes; already-sounding notes ring out |
-| `setLoop(start, end)` / `clearLoop()` | while playing, the cursor wraps at `end` back to `start`; `loopEnd <= loopStart` clears |
+| `setLoop(start, end)` / `clearLoop()` | while playing, the cursor wraps at `end` back to `start`; a cursor already past `end` is pulled back to `start` on the next tick (one before `start` plays the lead-in and enters the loop normally); `loopEnd <= loopStart` clears |
 | `onTick(beat)` | after every tick and every seek |
 | `onEnd()` | once, when the cursor passes `totalBeats + tailBeats` |
 | `pitches()` | unique pitches in the loaded song (for `warm()`) |

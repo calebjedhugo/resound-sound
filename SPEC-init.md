@@ -1,8 +1,10 @@
 # SPEC: Eager initialization for sampled instruments
 
-Status: implementing. Consumer: singHarmony2 — the piano must be warm and ready
-by the time the user reaches the play button, with `warm()` fired at page load
-instead of on the first play tap.
+Status: **implemented** — `src/lib/instrumentRegistry.js` (including the
+`instrumentReady` follow-up in point 5), covered by `initInstruments.test.js`.
+Consumer: singHarmony2 — the piano must be warm and ready by the time the user
+reaches the play button, with `warm()` fired at page load instead of on the
+first play tap.
 
 ## The problem
 
@@ -58,8 +60,8 @@ Behavior:
 
 ## Constraints
 
-- No breaking changes to any existing export or behavior; `npm test` (22
-  integration tests) stays green.
+- No breaking changes to any existing export or behavior; `npm test` stays
+  green (22 integration tests when this spec was written).
 - jsdom has no `OfflineAudioContext` — `warm()` already no-ops there; init
   must still resolve cleanly in that environment (tests rely on it).
 - Don't reformat the `src/index.js` export block (editor middleware regex);

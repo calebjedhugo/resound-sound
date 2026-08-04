@@ -4,7 +4,7 @@ Published Web Audio package extracted from `resound-fe/src/audio/`. See `README.
 
 ## Release prerequisites
 
-`NPM_TOKEN` (npm **Automation** token) is configured as a GitHub Actions secret — `.github/workflows/release.yml` uses it to `npm publish` on `v*` tag push. If publishing ever fails on auth, rotate the token at npmjs.com → Access Tokens → Classic → Automation, then update the `NPM_TOKEN` secret at github.com/calebjedhugo/resound-sound → Settings → Secrets and variables → Actions.
+Publishing is **manual and local** — it needs `npm login` with publish rights on `resound-sound`. There is no release workflow; `.github/workflows/ci.yml` is the only workflow and it just runs tests + build. (An earlier `release.yml` published on `v*` tag push using an `NPM_TOKEN` Actions secret; it is gone, so that secret is inert.) See **Release (manual)** below.
 
 ## Architecture
 
@@ -14,6 +14,7 @@ Published Web Audio package extracted from `resound-fe/src/audio/`. See `README.
     - **`await piano.warm([pitches])`** pre-renders at load — REQUIRED for mobile/dense polyphony to avoid first-hit live spikes.
     - **`new Piano(id, { autoSample: false })`** = pure live (continuous velocity, max fidelity). Also `{ layers, maxCacheEntries }`.
 - `src/lib/` — `AudioContextManager` (singleton), `Envelope`, `MusicalClock`, `duration`, `noteFrequencies`.
+  - `noteFrequencies.js` — a measured table for C/2–B/5; anything outside it is computed in equal temperament. Accepts `'C/4'` and `'C4'`. Only genuinely unparseable input falls back to A4 with a warning.
   - `instrumentRegistry.js` — `initInstruments()` / `getInstrument()` / `instrumentReady()`: eager page-load construction + warm of sampled instruments, registered by id (`SPEC-init.md`). `getInstrument` is synchronous and says nothing about warming; `instrumentReady(id)` is the awaitable one, for code that didn't start the init (a play button tapped mid-warm).
   - `timeline.js` + `Sequencer.js` — schema-native multi-voice playback (`src/SPEC-schema-playback.md`). `buildTimeline()` is the ONE place the shared note schema is interpreted for audio (dotted, tie merging, chords); `Sequencer` runs those events on a 25ms beat-cursor clock with live seek/tempo/mute/loop. **Consumers must never re-implement this in app code** — the same untransformed arrays feed resound-notation's `render()` and this.
 - `src/index.js` — public exports. **NEVER reformat the export block** — the Vite middleware in `src/editor/vite.config.js` parses it with a regex when the editor creates new instruments.
@@ -22,7 +23,7 @@ Published Web Audio package extracted from `resound-fe/src/audio/`. See `README.
 ## Workflows
 
 ```bash
-npm test            # Jest, 84 integration tests — keep these green, they are the safety net
+npm test            # Jest, 111 integration tests — keep these green, they are the safety net
 npm run build       # webpack ESM bundle + tsc declarations to dist/
 npm start           # webpack-watch + tsc-watch + editor on http://localhost:5174
 ```
@@ -55,10 +56,10 @@ Editor only knows the synth topology. Noise-based instruments (Clap-style) still
 - **IMPORTANT: `AudioContextManager` and the `instrumentRegistry` are module-level singletons.** Two copies of `resound-sound` in a consumer's `node_modules` tree gives two AudioContexts (timing weirdness) and two registries (`getInstrument` returns `undefined` for an id the other copy registered). After linking, verify with `npm ls resound-sound` in the consumer.
 - **IMPORTANT: Consumers using jest need `transformIgnorePatterns: ['/node_modules/(?!(resound-sound)/)']`** — the published bundle is ESM and babel-jest skips `node_modules` by default.
 - **Vite 4, not 5.** Vite 5 requires Node 18+; user is on Node 16. Matches resound-fe.
-- **`Instrument.play()` with `data: []` crashes** at `playSchedule[playSchedule.length - 1].duration`. Known bug, out of scope for v0.1.x.
+- **`stop()` does not interrupt an in-flight `setTimeout` sleep either** — same mechanism as the pause quirk, so one more note straggles out. Unlike pause, the state it leaves behind IS a full stop: `playbackState.isStopping` tells the unwinding loop not to re-park the cleared state as a pause.
 
 ## Consumer
 
 `resound-fe` (`~/Development/personal dev work.nosync/resound-fe/`) imports from this package. Six files: `core/{PlaybackManager,ClapManager,GameState}.js`, `entities/{Creature,Fountain}.js`, `createEventListeners.js`. Full suite is 1150 / 66 — keep it green when bumping the package.
 
-`singHarmony2` (`~/Development/personal dev work.nosync/singHarmony2/`) drove `initInstruments` and `Sequencer`, and consumes this package as a local `file:` link pending the next publish. It has no test suite of its own — verification is browser-driven, so breaking changes surface only there.
+`singHarmony2` (`~/Development/personal dev work.nosync/singHarmony2/`) drove `initInstruments` and `Sequencer`, and consumes this package as a local `file:` link pending the next publish. Its `src/player.js` is a thin adapter over `Sequencer`; it tests that adapter (`player.test.js`) and runs every song through `buildTimeline` (`songs.render.test.js`), but the audio itself is verified in the browser.
