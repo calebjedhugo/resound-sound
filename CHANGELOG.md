@@ -20,6 +20,7 @@ All notable changes to this package follow [Keep a Changelog](https://keepachang
 - `initInstruments` now warns instead of failing silently on an unusable config: a type it does not know (a typo) or an entry with no `id`. Both cases previously did nothing at all, leaving the consumer with an instrument that never warmed and a `getInstrument(id)` that returned `undefined` forever.
 
 ### Changed
+- `Piano.warm()` now renders through a bounded pool (`warmConcurrency`, default 4) instead of launching every `(pitch, layer)` render at once. A full-range warm used to create ~200 concurrent `OfflineAudioContext`s — a memory spike that killed the tab on small phones (iPhone SE) and, it turns out, was *slower* even on desktop (contention: ~14s for 192 buffers vs ~2s pooled). `warm(pitches, { front: true })` queues those pitches ahead of anything already waiting — a play tap's own song jumps a whole-catalog warm. Renders already in flight and cached buffers are deduped exactly as before, and `warm()`'s resolve/reject contract is unchanged.
 - `Synth`, `Fountain` and `Clap` constructors dropped their vestigial second `recordingCallback` parameter. It was forwarded to a base constructor that never accepted it, so it has never done anything — note callbacks are and were set through the `noteCallback` property. Passing a second argument was already ignored, so nothing changes for callers; the editor's new-instrument template no longer emits it either.
 
 ## [0.2.0] — 2026-07-19

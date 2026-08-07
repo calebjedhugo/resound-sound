@@ -105,6 +105,13 @@ class Piano extends Instrument {
     this.maxCacheEntries = opts.maxCacheEntries || 512;
     this.sampleBuffers = new Map(); // `${midi}:${layer}` -> AudioBuffer
     this.pendingRenders = new Map(); // `${midi}:${layer}` -> Promise<AudioBuffer>
+    // warm() renders through a small pool instead of all at once: a full-range
+    // warm is hundreds of OfflineAudioContexts, and launching them together
+    // spikes memory hard enough to kill the tab on small phones.
+    this.warmConcurrency = opts.warmConcurrency || 4;
+    this._warmQueue = []; // jobs waiting for a pool slot
+    this._warmJobs = new Map(); // `${midi}:${layer}` -> queued job (dedupe)
+    this._warmActive = 0;
     // Default: lazy auto-cache — the first strike of a pitch renders live, then
     // its buffer is rendered in the background and every later strike is cheap.
     // Pass { autoSample: false } for pure live (continuous velocity, max fidelity).
@@ -472,18 +479,69 @@ class Piano extends Instrument {
 
   /**
    * Pre-render a set of pitches (all velocity layers) so their playback is cheap.
+   * Renders go through the instance's pool (`warmConcurrency` at a time), so a
+   * full-range warm stays a background hum instead of a memory spike. Passing
+   * `front: true` puts these pitches ahead of anything already queued — the
+   * play-tap path, which should not wait behind a whole-catalog warm.
    * @param {string[]} pitches - e.g. ['C/2', 'C#/2', ...]
+   * @param {{front?: boolean}} [opts]
    */
-  async warm(pitches) {
+  async warm(pitches, { front = false } = {}) {
     const jobs = [];
+    const enqueue = [];
+    const promote = [];
     pitches.forEach((pitch) => {
       const f0 = getFrequency(pitch);
       const midi = this.midiFromFreq(f0);
       for (let li = 0; li < this.velocityLayers.length; li += 1) {
-        jobs.push(this.ensureBuffer(midi, li, f0));
+        const key = this.cacheKey(midi, li);
+        if (this.sampleBuffers.has(key)) continue;
+        if (this.pendingRenders.has(key)) {
+          jobs.push(this.pendingRenders.get(key));
+          continue;
+        }
+        let job = this._warmJobs.get(key);
+        if (!job) {
+          job = { key, midi, li, f0 };
+          job.promise = new Promise((resolve, reject) => {
+            job.resolve = resolve;
+            job.reject = reject;
+          });
+          this._warmJobs.set(key, job);
+          enqueue.push(job);
+        } else if (front) {
+          promote.push(job);
+        }
+        jobs.push(job.promise);
       }
     });
+    if (front) {
+      for (const job of promote) {
+        const i = this._warmQueue.indexOf(job);
+        if (i >= 0) this._warmQueue.splice(i, 1);
+      }
+      this._warmQueue.unshift(...enqueue, ...promote);
+    } else {
+      this._warmQueue.push(...enqueue);
+    }
+    this._pumpWarmQueue();
     await Promise.all(jobs);
+  }
+
+  /** Start queued warm renders until the pool is full. */
+  _pumpWarmQueue() {
+    while (this._warmActive < this.warmConcurrency && this._warmQueue.length) {
+      const job = this._warmQueue.shift();
+      this._warmJobs.delete(job.key);
+      this._warmActive += 1;
+      const done = () => {
+        this._warmActive -= 1;
+        this._pumpWarmQueue();
+      };
+      this.ensureBuffer(job.midi, job.li, job.f0)
+        .then(job.resolve, job.reject)
+        .then(done);
+    }
   }
 }
 
