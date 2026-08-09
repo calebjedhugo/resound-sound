@@ -83,7 +83,7 @@ async function initOne(Ctor, typeName, cfg = {}) {
  * outside a user gesture.
  *
  * @param {Object} [config] - per-type config, e.g.
- *   { piano: { id: 'my-piano', layers: [...], maxCacheEntries, pitches: [...] } }
+ *   { piano: { id: 'my-piano', layers: [...], maxCacheBytes, pitches: [...] } }
  * @returns {Promise<Object>} resolves with { [type]: instance } once warming
  *   completes; callers may ignore the promise for fire-and-forget.
  */

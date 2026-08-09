@@ -102,8 +102,13 @@ class Piano extends Instrument {
     // Sampled-playback cache. Each warmed (pitch, velocity-layer) note plays back
     // as a single BufferSourceNode (~40x cheaper than the live additive synth).
     this.velocityLayers = opts.layers && opts.layers.length ? opts.layers.slice() : DEFAULT_LAYERS;
-    this.maxCacheEntries = opts.maxCacheEntries || 512;
-    this.sampleBuffers = new Map(); // `${midi}:${layer}` -> AudioBuffer
+    // The cache is byte-bounded (mono Float32 samples: length * 4 bytes each),
+    // evicting least-recently-used until under budget. `maxCacheEntries` is
+    // still honored as an additional entry-count cap for back-compat.
+    this.maxCacheBytes = opts.maxCacheBytes || 32 * 1024 * 1024;
+    this.maxCacheEntries = opts.maxCacheEntries || Infinity;
+    this.cacheBytes = 0;
+    this.sampleBuffers = new Map(); // `${midi}:${layer}` -> AudioBuffer (LRU: oldest first)
     this.pendingRenders = new Map(); // `${midi}:${layer}` -> Promise<AudioBuffer>
     // warm() renders through a small pool instead of all at once: a full-range
     // warm is hundreds of OfflineAudioContexts, and launching them together
@@ -365,7 +370,7 @@ class Piano extends Instrument {
     const v = clampNum(velocity, 0, 1);
     const li = this.nearestLayerIndex(v);
     const midi = this.midiFromFreq(f0);
-    const buffer = this.sampleBuffers.get(this.cacheKey(midi, li));
+    const buffer = this._cacheGet(this.cacheKey(midi, li));
     if (buffer) {
       this.playSampledNote(buffer, li, v, duration);
       return;
@@ -442,6 +447,39 @@ class Piano extends Instrument {
     return `${midi}:${layerIndex}`;
   }
 
+  /** Bytes a cached buffer occupies (mono Float32 samples). */
+  // eslint-disable-next-line class-methods-use-this
+  _bufferBytes(buffer) {
+    return buffer.length * 4;
+  }
+
+  /** Cache lookup that refreshes recency (Map order = LRU, oldest first). */
+  _cacheGet(key) {
+    const buffer = this.sampleBuffers.get(key);
+    if (buffer === undefined) return undefined;
+    this.sampleBuffers.delete(key);
+    this.sampleBuffers.set(key, buffer);
+    return buffer;
+  }
+
+  /** Insert a buffer, then evict least-recently-used until under budget. */
+  _cacheSet(key, buffer) {
+    const old = this.sampleBuffers.get(key);
+    if (old) this.cacheBytes -= this._bufferBytes(old);
+    this.sampleBuffers.delete(key);
+    this.sampleBuffers.set(key, buffer);
+    this.cacheBytes += this._bufferBytes(buffer);
+    // Never evict the entry just inserted (size > 1): a single buffer larger
+    // than the whole budget must still be cached or nothing ever plays cheap.
+    while (this.sampleBuffers.size > 1
+      && (this.cacheBytes > this.maxCacheBytes
+        || this.sampleBuffers.size > this.maxCacheEntries)) {
+      const oldest = this.sampleBuffers.keys().next().value;
+      this.cacheBytes -= this._bufferBytes(this.sampleBuffers.get(oldest));
+      this.sampleBuffers.delete(oldest);
+    }
+  }
+
   /** Render one (pitch, velocity-layer) note to an AudioBuffer, offline. */
   renderBuffer(f0, layerVel) {
     // Synthesis tops out at MAX_PARTIAL_HZ (7 kHz; hammer lowpass caps at
@@ -470,11 +508,7 @@ class Piano extends Instrument {
     const promise = this.renderBuffer(f0, this.velocityLayers[layerIndex])
       .then((buffer) => {
         this.pendingRenders.delete(key);
-        this.sampleBuffers.set(key, buffer);
-        if (this.sampleBuffers.size > this.maxCacheEntries) {
-          const oldest = this.sampleBuffers.keys().next().value;
-          this.sampleBuffers.delete(oldest);
-        }
+        this._cacheSet(key, buffer);
         return buffer;
       })
       .catch((err) => { this.pendingRenders.delete(key); throw err; });

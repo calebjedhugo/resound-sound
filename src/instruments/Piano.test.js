@@ -604,6 +604,49 @@ describe('Piano playback', () => {
       expect(piano.nearestLayerIndex(1.0)).toBe(2);
     });
 
+    it('evicts least-recently-used buffers once the byte budget is exceeded', async () => {
+      const ref = new Piano('ref-bytes');
+      const bytes = (pitch) => Math.ceil(ref.bufferSeconds(getFrequency(pitch)) * 20050) * 4;
+      // Budget fits C/5 + D/5 (and the shorter E/5), but never all three.
+      const piano = new Piano('p', {
+        layers: [0.7],
+        maxCacheBytes: bytes('C/5') + bytes('D/5') + 16,
+      });
+      await piano.warm(['C/5']);
+      await piano.warm(['D/5']);
+      await piano.warm(['E/5']); // over budget: least-recently-used (C/5) goes
+      const key = (pitch) => `${piano.midiFromFreq(getFrequency(pitch))}:0`;
+      expect(piano.sampleBuffers.has(key('C/5'))).toBe(false);
+      expect(piano.sampleBuffers.has(key('D/5'))).toBe(true);
+      expect(piano.sampleBuffers.has(key('E/5'))).toBe(true);
+      expect(piano.cacheBytes).toBeLessThanOrEqual(piano.maxCacheBytes);
+    });
+
+    it('a cache hit refreshes recency, protecting the buffer from eviction', async () => {
+      const ref = new Piano('ref-bytes2');
+      const bytes = (pitch) => Math.ceil(ref.bufferSeconds(getFrequency(pitch)) * 20050) * 4;
+      const piano = new Piano('p', {
+        layers: [0.7],
+        maxCacheBytes: bytes('C/5') + bytes('D/5') + 16,
+      });
+      await piano.warm(['C/5']);
+      await piano.warm(['D/5']);
+      piano.startNote('C/5', 500, 0.7); // hit: C/5 becomes most recent
+      await piano.warm(['E/5']); // now D/5 is the LRU entry
+      const key = (pitch) => `${piano.midiFromFreq(getFrequency(pitch))}:0`;
+      expect(piano.sampleBuffers.has(key('C/5'))).toBe(true);
+      expect(piano.sampleBuffers.has(key('D/5'))).toBe(false);
+      expect(piano.sampleBuffers.has(key('E/5'))).toBe(true);
+    });
+
+    it('still honors maxCacheEntries as an entry-count cap', async () => {
+      const piano = new Piano('p', { layers: [0.7], maxCacheEntries: 2 });
+      await piano.warm(['C/4']);
+      await piano.warm(['D/4']);
+      await piano.warm(['E/4']);
+      expect(piano.sampleBuffers.size).toBe(2);
+    });
+
     it('renders offline buffers at a reduced sample rate (synthesis caps at 7 kHz)', async () => {
       const piano = new Piano('p', { layers: [0.7] });
       await piano.warm(['C/4']);
