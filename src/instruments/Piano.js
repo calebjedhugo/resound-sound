@@ -444,7 +444,12 @@ class Piano extends Instrument {
 
   /** Render one (pitch, velocity-layer) note to an AudioBuffer, offline. */
   renderBuffer(f0, layerVel) {
-    const sr = this.context.sampleRate;
+    // Synthesis tops out at MAX_PARTIAL_HZ (7 kHz; hammer lowpass caps at
+    // 3 kHz), so rendering at the live context's 44.1/48 kHz wastes CPU and
+    // cache memory on spectrum that is never there. Render at ~20 kHz instead
+    // (Nyquist above 10 kHz — comfortably clear of the synthesis ceiling);
+    // AudioBufferSourceNode resamples to the live rate at playback for free.
+    const sr = Math.min(this.context.sampleRate, 20050);
     const seconds = this.bufferSeconds(f0);
     const OfflineCtor = offlineAudioContextCtor();
     if (!OfflineCtor) return Promise.reject(new Error('OfflineAudioContext unavailable'));

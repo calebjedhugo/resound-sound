@@ -604,6 +604,17 @@ describe('Piano playback', () => {
       expect(piano.nearestLayerIndex(1.0)).toBe(2);
     });
 
+    it('renders offline buffers at a reduced sample rate (synthesis caps at 7 kHz)', async () => {
+      const piano = new Piano('p', { layers: [0.7] });
+      await piano.warm(['C/4']);
+      const buffer = piano.sampleBuffers.values().next().value;
+      // min(live 44100, 20050) — the additive synth never exceeds 7 kHz, so a
+      // ~20 kHz render carries the full spectrum at ~2.2x less CPU/memory.
+      expect(buffer.sampleRate).toBe(20050);
+      expect(buffer.length)
+        .toBe(Math.ceil(piano.bufferSeconds(getFrequency('C/4')) * 20050));
+    });
+
     it('bass buffers are longer than treble buffers', () => {
       const piano = new Piano();
       expect(piano.bufferSeconds(getFrequency('C/2')))
