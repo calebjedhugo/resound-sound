@@ -69,6 +69,7 @@ class Sequencer {
     this.onEnd = null; // () => void
 
     this._pitches = [];
+    this._activeVoiceCount = null; // lazily computed; nulled when voices/mutes change
     this._cursor = 0;
     this._timer = null;
     this._lastNow = 0;
@@ -90,6 +91,7 @@ class Sequencer {
     this.basis = this.song.basis || 4;
     this.tempoMap = (this.song.tempoMap || []).slice().sort((a, b) => a.beat - b.beat);
     this.voiceIds = (this.song.voices || []).map((voice, i) => (voice.id !== undefined ? voice.id : i));
+    this._activeVoiceCount = null;
     this.startBeat = events.length ? events[0].beat : 0;
     this.beat = this.startBeat;
     this.clearLoop();
@@ -185,11 +187,13 @@ class Sequencer {
 
   mute(voiceId) {
     this.muted.add(voiceId);
+    this._activeVoiceCount = null;
     return this;
   }
 
   unmute(voiceId) {
     this.muted.delete(voiceId);
+    this._activeVoiceCount = null;
     return this;
   }
 
@@ -197,11 +201,13 @@ class Sequencer {
   toggleMute(voiceId) {
     if (this.muted.has(voiceId)) this.muted.delete(voiceId);
     else this.muted.add(voiceId);
+    this._activeVoiceCount = null;
     return !this.muted.has(voiceId);
   }
 
   setMuted(voiceIds) {
     this.muted = new Set(voiceIds || []);
+    this._activeVoiceCount = null;
     return this;
   }
 
@@ -319,10 +325,24 @@ class Sequencer {
       voiceId: event.voiceId,
       beat: event.beat,
       durationBeats: event.durationBeats,
-      activeVoices: this.voiceIds.filter((id) => !this.muted.has(id)).length,
+      activeVoices: this._activeVoices(),
       voiceCount: this.voiceIds.length,
       muted: this.muted,
     });
+  }
+
+  /**
+   * Unmuted-voice count, cached — the velocity callback runs per sounding
+   * note, and recounting (a filter + closure allocation) on every note adds
+   * up. Invalidated by load() and the mute mutators; code that pokes
+   * `this.muted` directly instead of using them was never supported.
+   */
+  _activeVoices() {
+    if (this._activeVoiceCount === null) {
+      this._activeVoiceCount = this.voiceIds
+        .filter((id) => !this.muted.has(id)).length;
+    }
+    return this._activeVoiceCount;
   }
 
   /** First event index at or after `beat`. */
