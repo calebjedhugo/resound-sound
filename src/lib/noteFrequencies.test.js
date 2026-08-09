@@ -16,6 +16,12 @@ describe('getFrequency', () => {
     expect(getFrequency('C/4')).toBe(261.626);
   });
 
+  it('computes double accidentals instead of falling back to A4', () => {
+    // Bbb3 is enharmonically A3 (220 Hz); F##2 is enharmonically G2.
+    expect(getFrequency('Bbb3')).toBeCloseTo(220, 3);
+    expect(getFrequency('F##2')).toBeCloseTo(getFrequency('G/2'), 1);
+  });
+
   it('accepts the no-slash shorthand and resolves it to the same value', () => {
     expect(getFrequency('A4')).toBe(getFrequency('A/4'));
     expect(getFrequency('C#4')).toBe(getFrequency('C#/4'));

@@ -4,6 +4,9 @@ All notable changes to this package follow [Keep a Changelog](https://keepachang
 
 ## [Unreleased]
 
+### Fixed
+- `getFrequency` now understands double accidentals (`Bbb3`, `F##2`, schema or shorthand form) instead of falling back to A4 — a Db-major augmented sixth plays at pitch.
+
 ### Added
 - `Sequencer` — schema-native multi-voice playback (`src/SPEC-schema-playback.md`). Consumes the same untransformed voice/note arrays resound-notation renders (dotted values, tie chains merged into one sounding note, chords) over one shared beat clock in notated-beat units (the `data-beat` timeline), and adds the live controls `Instrument.play()` has never had: in-place `pause`/`play`, `seek(beat)`, `setTempo(bpm)`, per-voice `mute`/`unmute`/`setMuted`, `setLoop(a, b)` A-B looping, `onTick(beat)` / `onEnd`, `tempoMap` rit/accel multipliers, a velocity policy (constant or per-note callback, given the unmuted-voice count), and per-voice instrument routing. `Instrument.play()` and every existing export are untouched.
 - `buildTimeline(song)`, `noteBeats(note, basis)`, `elementBeats(element, basis)` — the pure schema→events pass behind `Sequencer`, exported for analysis and testing.

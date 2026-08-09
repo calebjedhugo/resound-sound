@@ -76,8 +76,9 @@ const A4_MIDI = 69;
 const NATURAL_SEMITONES = {
   C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11,
 };
-// 'C/4' (schema form) and 'C4' (shorthand), sharp or flat, any octave.
-const PITCH_PATTERN = /^([A-G])([#b]?)\/?(-?\d+)$/;
+// 'C/4' (schema form) and 'C4' (shorthand), sharp/flat (single or double),
+// any octave.
+const PITCH_PATTERN = /^([A-G])(##|#|bb|b)?\/?(-?\d+)$/;
 
 /**
  * Table lookup that only ever yields a number — a plain object lookup would
@@ -111,12 +112,12 @@ export function getFrequency(pitch) {
 
     const match = pitch.match(PITCH_PATTERN);
     if (match) {
-      const [, letter, accidental, octave] = match;
+      const [, letter, accidental = '', octave] = match;
       // Shorthand ('C4') still gets the table's measured value when in range.
       const tabled = tabledFrequency(`${letter}${accidental}/${octave}`);
       if (tabled !== undefined) return tabled;
 
-      const alteration = (accidental === '#' ? 1 : 0) - (accidental === 'b' ? 1 : 0);
+      const alteration = { '##': 2, '#': 1, '': 0, b: -1, bb: -2 }[accidental];
       const midi = (Number(octave) + 1) * 12 + NATURAL_SEMITONES[letter] + alteration;
       return A4_HZ * 2 ** ((midi - A4_MIDI) / 12);
     }
