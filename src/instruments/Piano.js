@@ -376,9 +376,40 @@ class Piano extends Instrument {
       return;
     }
     // Un-warmed: render live now, and (by default) render this buffer in the
-    // background so the next strike of this pitch/layer is cheap.
+    // background so the next strike of this pitch/layer is cheap. The render
+    // goes through the warm pool (front of queue), NOT straight to
+    // ensureBuffer: an un-warmed chord run would otherwise spawn one
+    // OfflineAudioContext per note with no bound, mid-playback.
     this.playLiveNote(f0, v, duration);
-    if (this.autoSample) this.ensureBuffer(midi, li, f0).catch(() => {});
+    if (this.autoSample) this._queueRender(midi, li, f0);
+  }
+
+  /**
+   * Queue one speculative (pitch, layer) render at the front of the warm pool.
+   * Dedupes against cached buffers, renders in flight, and queued warm jobs.
+   */
+  _queueRender(midi, li, f0) {
+    const key = this.cacheKey(midi, li);
+    if (this.sampleBuffers.has(key) || this.pendingRenders.has(key)) return;
+    let job = this._warmJobs.get(key);
+    if (!job) {
+      job = { key, midi, li, f0 };
+      job.promise = new Promise((resolve, reject) => {
+        job.resolve = resolve;
+        job.reject = reject;
+      });
+      job.promise.catch(() => {}); // speculative — nobody awaits it
+      this._warmJobs.set(key, job);
+      this._warmQueue.unshift(job);
+    } else {
+      // Already queued (e.g. by a background warm): promote it to the front.
+      const i = this._warmQueue.indexOf(job);
+      if (i > 0) {
+        this._warmQueue.splice(i, 1);
+        this._warmQueue.unshift(job);
+      }
+    }
+    this._pumpWarmQueue();
   }
 
   /** Full additive synth: one decaying oscillator per voice + hammer. */

@@ -604,6 +604,30 @@ describe('Piano playback', () => {
       expect(piano.nearestLayerIndex(1.0)).toBe(2);
     });
 
+    it('speculative auto-cache renders are bounded by the warm pool', async () => {
+      const piano = new Piano('p');
+      const pending = [];
+      jest.spyOn(piano, 'renderBuffer')
+        .mockImplementation(() => new Promise((resolve) => { pending.push(resolve); }));
+
+      // An un-warmed 8-note flurry: each strike plays live and wants a
+      // background render. Only warmConcurrency renders may be in flight.
+      const pitches = ['C/4', 'D/4', 'E/4', 'F/4', 'G/4', 'A/4', 'B/4', 'C/5'];
+      pitches.forEach((pitch) => piano.startNote(pitch, 500));
+      expect(piano.pendingRenders.size).toBe(piano.warmConcurrency);
+      expect(piano._warmQueue.length).toBe(pitches.length - piano.warmConcurrency);
+
+      // Drain: as each batch resolves, the pool starts the next.
+      while (pending.length) {
+        pending.splice(0).forEach((resolve) => resolve({ length: 10 }));
+        // eslint-disable-next-line no-await-in-loop
+        await jest.advanceTimersByTimeAsync(0);
+      }
+      expect(piano.sampleBuffers.size).toBe(pitches.length);
+      expect(piano.pendingRenders.size).toBe(0);
+      expect(piano._warmQueue.length).toBe(0);
+    });
+
     it('evicts least-recently-used buffers once the byte budget is exceeded', async () => {
       const ref = new Piano('ref-bytes');
       const bytes = (pitch) => Math.ceil(ref.bufferSeconds(getFrequency(pitch)) * 20050) * 4;
