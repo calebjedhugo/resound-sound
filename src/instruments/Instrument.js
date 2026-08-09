@@ -44,6 +44,9 @@ class Instrument {
     // Track all active oscillators so we can stop them
     this.activeOscillators = new Set();
 
+    // Pending trackOscillator() timeouts, cleared by stopAll().
+    this._trackTimers = new Set();
+
     // Playback state for pause/resume functionality
     this.playbackState = {
       isPlaying: false,
@@ -299,7 +302,9 @@ class Instrument {
       }
     });
 
-    // Clear the set
+    // Clear the set, and the per-note timers that would only re-delete from it
+    this._trackTimers.forEach((timer) => clearTimeout(timer));
+    this._trackTimers.clear();
     this.activeOscillators.clear();
   }
 
@@ -373,10 +378,31 @@ class Instrument {
     // Add to active set
     this.activeOscillators.add(oscillatorData);
 
-    // Auto-remove after duration
-    setTimeout(() => {
+    // Free the note's graph when the source actually ends. Without this every
+    // finished note leaves its gain connected to the bus forever — a leak on
+    // Safari and a per-quantum summing cost everywhere. onended (not the
+    // duration timer below) is the release-safe moment: sampled playback rings
+    // until noteEnd + release, past the notated duration. A shared gain (live
+    // Piano routes ~40 oscillators through one volume gain) gets disconnected
+    // by whichever source ends first; the rest end at the same scheduled stop,
+    // and disconnecting a disconnected node is a no-op.
+    oscillator.onended = () => {
+      try {
+        gainNode.disconnect();
+      } catch (e) {
+        // Node may already be disconnected (shared gain, or context torn down).
+      }
+      this.activeOscillators.delete(oscillatorData);
+    };
+
+    // Fallback removal from the active set after the notated duration — the
+    // long-standing bound stopAll()/updateVolume() iterate within, and the
+    // only cleanup in environments whose mocks never fire onended.
+    const timer = setTimeout(() => {
+      this._trackTimers.delete(timer);
       this.activeOscillators.delete(oscillatorData);
     }, duration);
+    this._trackTimers.add(timer);
   }
 }
 

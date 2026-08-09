@@ -597,6 +597,40 @@ describe('Piano playback', () => {
       await play;
     });
 
+    it('disconnects the note gain from the bus when the source ends', async () => {
+      const piano = new Piano('p', { layers: [0.7] });
+      await piano.warm(['C/4']);
+
+      const context = audioContextManager.getContext();
+      jest.restoreAllMocks();
+      const gains = [];
+      const sources = [];
+      const origGain = context.createGain.bind(context);
+      const origSrc = context.createBufferSource.bind(context);
+      jest.spyOn(context, 'createGain').mockImplementation(() => { const n = origGain(); gains.push(n); return n; });
+      jest.spyOn(context, 'createBufferSource').mockImplementation(() => { const n = origSrc(); sources.push(n); return n; });
+
+      piano.startNote('C/4', 100, 0.7);
+      expect(gains).toHaveLength(1);
+      expect(sources).toHaveLength(1);
+      // trackOscillator arms onended so the gain is freed at the source's
+      // actual end (noteEnd + release), never at the shorter notated duration.
+      expect(typeof sources[0].onended).toBe('function');
+      const disconnectSpy = jest.spyOn(gains[0], 'disconnect');
+      sources[0].onended();
+      expect(disconnectSpy).toHaveBeenCalled();
+      expect(piano.activeOscillators.size).toBe(0);
+    });
+
+    it('stopAll clears pending tracking timers', () => {
+      const piano = new Piano('p', { autoSample: false });
+      piano.startNote('C/4', 500);
+      expect(piano._trackTimers.size).toBeGreaterThan(0);
+      piano.stopAll();
+      expect(piano._trackTimers.size).toBe(0);
+      expect(piano.activeOscillators.size).toBe(0);
+    });
+
     it('picks the nearest velocity layer', () => {
       const piano = new Piano('p', { layers: [0.2, 0.5, 0.8] });
       expect(piano.nearestLayerIndex(0.2)).toBe(0);
