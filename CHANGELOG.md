@@ -4,6 +4,10 @@ All notable changes to this package follow [Keep a Changelog](https://keepachang
 
 ## [Unreleased]
 
+### Added
+- `Sequencer` audio-clock lookahead ("A Tale of Two Clocks"): when every routed instrument opts in (`schedulesAhead = true` plus a context clock — `Piano` does), notes are handed to the instrument up to `lookaheadMs` (default 100) ahead of their beat with an exact audio-clock `when`, so onsets no longer inherit main-thread timer jitter (the 25ms tick, GC pauses, consumer DOM work) and short timer stalls can't smear attacks. The beat cursor, `onTick`, seek, tempo, mute and A-B loop semantics are unchanged; seeks and mid-play loop edits cancel the abandoned lookahead window (`Instrument.cancelScheduled()`) so no stale future notes leak through. Instruments that don't opt in — and any environment without an audio clock (jsdom, test stubs) — keep the exact fire-on-cross behavior and 3-arg `startNote` call shape. `lookaheadMs: 0` disables.
+- `Instrument.cancelScheduled()` — stops tracked notes whose scheduled onset hasn't been reached, leaving ringing notes untouched. `startNote(pitch, duration, velocity, when)` grows the optional `when` (audio-clock seconds); `Piano` honors it on both the sampled and live paths.
+
 ### Fixed
 - `getFrequency` now understands double accidentals (`Bbb3`, `F##2`, schema or shorthand form) instead of falling back to A4 — a Db-major augmented sixth plays at pitch.
 

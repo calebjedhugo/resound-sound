@@ -412,4 +412,115 @@ describe('Sequencer', () => {
     expect(seq.totalBeats).toBe(0);
     expect(seq.onEnd).toHaveBeenCalled();
   });
+
+  // ---------- audio-clock lookahead ----------
+  // An instrument that opts in (schedulesAhead + a context clock) gets every
+  // note ~lookaheadMs early with an exact audio-clock `when`, so onsets ride
+  // the audio clock instead of the jittery main-thread timer ("A Tale of Two
+  // Clocks"). The stub's clock tracks the test's fake wall clock.
+  describe('lookahead scheduling', () => {
+    class ScheduledStub extends StubInstrument {
+      constructor(clock) {
+        super('sched');
+        this.schedulesAhead = true;
+        this.context = clock;
+        this.cancelCalls = 0;
+      }
+
+      startNote(pitch, duration, velocity, when) {
+        this.calls.push({ pitch, duration, velocity, when });
+      }
+
+      cancelScheduled() {
+        this.cancelCalls += 1;
+      }
+    }
+
+    // The audio clock in seconds, riding the fake wall clock `t` (ms).
+    const clock = () => ({ get currentTime() { return t / 1000; } });
+
+    it('hands each note over early with its exact audio-clock onset', () => {
+      const piano = new ScheduledStub(clock());
+      const seq = makeSeq({ instrument: piano });
+      seq.play(SCALE); // 120bpm: beats land at 0ms, 500ms, 1000ms
+
+      // On play only C4 is inside the 100ms horizon, at `when` = now.
+      expect(piano.calls.map((c) => c.pitch)).toEqual(['C4']);
+      expect(piano.calls[0].when).toBeCloseTo(0, 6);
+
+      // D4 (beat 1 = 0.5s) enters the horizon at t=400ms, stamped for 0.5s.
+      step(375);
+      expect(piano.calls.map((c) => c.pitch)).toEqual(['C4']);
+      step(25);
+      expect(piano.calls.map((c) => c.pitch)).toEqual(['C4', 'D4']);
+      expect(piano.calls[1].when).toBeCloseTo(0.5, 6);
+
+      // E4 (beat 2 = 1.0s) likewise arrives a horizon early, stamped exactly.
+      step(500);
+      expect(piano.calls.map((c) => c.pitch)).toEqual(['C4', 'D4', 'E4']);
+      expect(piano.calls[2].when).toBeCloseTo(1.0, 6);
+    });
+
+    it('mutes apply when a note is scheduled, not when it sounds', () => {
+      const piano = new ScheduledStub(clock());
+      const seq = makeSeq({ instruments: { soprano: piano } });
+      seq.play(SCALE);
+      seq.mute('soprano');
+      step(1500);
+      expect(piano.calls.map((c) => c.pitch)).toEqual(['C4']); // only the pre-mute note
+    });
+
+    it('seek cancels the abandoned lookahead window and refills from the new beat', () => {
+      const piano = new ScheduledStub(clock());
+      const seq = makeSeq({ instrument: piano });
+      seq.play(SCALE);
+      step(400); // D4 is now scheduled ahead for 0.5s
+      expect(piano.calls.map((c) => c.pitch)).toEqual(['C4', 'D4']);
+
+      seq.seek(2);
+      expect(piano.cancelCalls).toBeGreaterThan(0); // the scheduled D4 is taken back
+      // E4 (the note at the seek target) fires immediately at the new position.
+      const last = piano.calls[piano.calls.length - 1];
+      expect(last.pitch).toBe('E4');
+      expect(last.when).toBeCloseTo(0.4, 6);
+    });
+
+    it('schedules across an A-B wrap with a continuous audio-clock timeline', () => {
+      const piano = new ScheduledStub(clock());
+      const seq = makeSeq({ instrument: piano });
+      seq.play(SCALE);
+      seq.setLoop(0, 1); // one beat: C4 restarts every 0.5s
+
+      step(1100);
+      const c4s = piano.calls.filter((c) => c.pitch === 'C4');
+      expect(c4s.length).toBeGreaterThanOrEqual(3);
+      // Each pass's onset is exactly half a second after the previous — the
+      // wrap is pre-scheduled on the audio clock, not fired late by a tick.
+      expect(c4s[1].when - c4s[0].when).toBeCloseTo(0.5, 6);
+      expect(c4s[2].when - c4s[1].when).toBeCloseTo(0.5, 6);
+      // And nothing outside the loop ever sounded.
+      expect(piano.calls.every((c) => c.pitch === 'C4')).toBe(true);
+    });
+
+    it('falls back to fire-on-cross when any routed instrument cannot schedule', () => {
+      const soprano = new ScheduledStub(clock());
+      const bass = new StubInstrument(); // no schedulesAhead, no clock
+      const seq = makeSeq({ instruments: { soprano, bass } });
+      seq.play(SATB);
+      step(500);
+
+      // Legacy semantics for everyone: no `when` handed to any instrument.
+      expect(soprano.calls.length).toBeGreaterThan(0);
+      expect(soprano.calls.every((c) => c.when === undefined)).toBe(true);
+    });
+
+    it('lookaheadMs: 0 disables scheduling ahead', () => {
+      const piano = new ScheduledStub(clock());
+      const seq = makeSeq({ instrument: piano, lookaheadMs: 0 });
+      seq.play(SCALE);
+      step(250);
+      expect(piano.calls.map((c) => c.pitch)).toEqual(['C4']); // D4 not yet crossed
+      expect(piano.calls[0].when).toBeUndefined();
+    });
+  });
 });

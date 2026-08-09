@@ -15,6 +15,7 @@
 import { buildTimeline } from './timeline';
 
 const DEFAULT_TICK_MS = 25;
+const DEFAULT_LOOKAHEAD_MS = 100;
 const PAUSE_FADE = 0.08;
 const EPS = 1e-9;
 // Onsets within a hair of the tick's end are fired now rather than a tick
@@ -33,6 +34,12 @@ class Sequencer {
    * @param {Object} [options.instruments] - per-voice-id overrides
    * @param {number|Function} [options.velocity] - constant, or ({voiceId, activeVoices, ...}) => 0..1
    * @param {number} [options.tickMs=25] - clock resolution
+   * @param {number} [options.lookaheadMs=100] - audio-clock scheduling horizon.
+   *   When every routed instrument supports it (schedulesAhead + a context
+   *   clock), notes are handed to the instrument this far ahead of their beat
+   *   with an exact `when`, so onsets ride the audio clock instead of the
+   *   jittery main-thread timer. 0 disables (every note fires on the tick
+   *   that crosses it, as before).
    * @param {number} [options.tailBeats=0] - beats to keep the cursor running past the last note
    * @param {Function} [options.now] - time source in ms (injectable for tests)
    */
@@ -41,6 +48,7 @@ class Sequencer {
     instruments = null,
     velocity,
     tickMs = DEFAULT_TICK_MS,
+    lookaheadMs = DEFAULT_LOOKAHEAD_MS,
     tailBeats = 0,
     now = defaultNow,
   } = {}) {
@@ -48,6 +56,7 @@ class Sequencer {
     this.instruments = instruments || {};
     this.velocityOption = velocity;
     this.tickMs = tickMs;
+    this.lookaheadMs = lookaheadMs;
     this.tailBeats = tailBeats;
     this._now = now;
 
@@ -73,6 +82,13 @@ class Sequencer {
     this._cursor = 0;
     this._timer = null;
     this._lastNow = 0;
+    // Lookahead scheduling state ("A Tale of Two Clocks"): `beat` stays the
+    // HEARD position (onTick, seek, loop wrap); _schedBeat is how far ahead
+    // events have already been handed to the instrument with an audio-clock
+    // `when`. _schedWrapped marks the scheduler having crossed the A-B loop
+    // boundary into the next pass while the heard cursor is still in this one.
+    this._schedBeat = 0;
+    this._schedWrapped = false;
   }
 
   /**
@@ -128,7 +144,15 @@ class Sequencer {
     this.playing = true;
     this._lastNow = this._now();
     this._cursor = this._indexAt(this.beat);
-    this._fireAt(this.beat); // notes sitting exactly on the cursor sound now
+    this._schedBeat = this.beat;
+    this._schedWrapped = false;
+    const audioNow = this._audioNow();
+    if (audioNow === null) {
+      this._fireAt(this.beat); // notes sitting exactly on the cursor sound now
+    } else {
+      // Same notes sound now (when = audioNow), plus the first horizon fills.
+      this._scheduleAhead(this.beat, audioNow);
+    }
     this._schedule();
     return this;
   }
@@ -160,8 +184,46 @@ class Sequencer {
   seek(beat) {
     this.beat = Math.max(0, Math.min(beat, this.totalBeats));
     this._cursor = this._indexAt(this.beat);
+    this._schedBeat = this.beat;
+    this._schedWrapped = false;
+    if (this.playing) {
+      const audioNow = this._audioNow();
+      if (audioNow !== null) {
+        // Take back the old position's lookahead window, then refill from the
+        // new one so the next lookaheadMs isn't silent. (The legacy path fired
+        // nothing ahead, so it has nothing to take back — the next tick just
+        // plays on from the re-aimed cursor.)
+        this._cancelScheduled();
+        this._scheduleAhead(this.beat, audioNow);
+      }
+    }
     if (this.onTick) this.onTick(this.beat);
     return this.beat;
+  }
+
+  _cancelScheduled() {
+    this._allInstruments().forEach((instrument) => {
+      if (typeof instrument.cancelScheduled === 'function') instrument.cancelScheduled();
+    });
+  }
+
+  /**
+   * A mid-play loop edit invalidates the lookahead scheduled under the old
+   * boundaries (notes past a new loopEnd, or a stale wrap). Unlike seek, the
+   * heard position hasn't moved: cancel only the not-yet-heard future and
+   * re-aim the scheduler just PAST the heard beat, so nothing already sounded
+   * replays. Legacy mode never scheduled ahead, so it needs (and gets) no
+   * resync — exactly the old behavior.
+   */
+  _resyncLoopEdit() {
+    if (!this.playing) return;
+    const audioNow = this._audioNow();
+    if (audioNow === null) return;
+    this._cancelScheduled();
+    this._cursor = this._indexPast(this.beat);
+    this._schedBeat = this.beat;
+    this._schedWrapped = false;
+    this._scheduleAhead(this.beat, audioNow);
   }
 
   /** Change tempo (BPM of the `basis` note). Takes effect on the next tick. */
@@ -223,12 +285,15 @@ class Sequencer {
     }
     this.loopStart = start;
     this.loopEnd = end;
+    this._resyncLoopEdit();
     return this;
   }
 
   clearLoop() {
+    const hadLoop = this.looping;
     this.loopStart = null;
     this.loopEnd = null;
+    if (hadLoop) this._resyncLoopEdit();
     return this;
   }
 
@@ -252,6 +317,7 @@ class Sequencer {
     const now = this._now();
     const dt = (now - this._lastNow) / 1000;
     this._lastNow = now;
+    const audioNow = this._audioNow();
 
     // A loop set (or a seek made) mid-playback can leave the cursor PAST the
     // loop, where the wrap below can never trigger — the cursor would then run
@@ -261,14 +327,37 @@ class Sequencer {
     if (this.looping && this.beat >= this.loopEnd - EPS) {
       this.beat = this.loopStart;
       this._cursor = this._indexAt(this.beat);
-      this._fireAt(this.beat);
+      this._schedBeat = this.beat;
+      this._schedWrapped = false;
+      if (audioNow === null) this._fireAt(this.beat);
+      // (lookahead: _scheduleAhead below sounds these with when = audioNow)
     }
 
     const from = this.beat;
     let to = from + dt / this.secondsPerBeat(from);
     const wrapping = this.looping && from < this.loopEnd && to >= this.loopEnd - EPS;
 
-    if (wrapping) {
+    if (audioNow !== null) {
+      // Lookahead: events fire from the SCHEDULING cursor with an exact
+      // audio-clock `when`; the heard beat only wraps and reports. When the
+      // heard cursor crosses the loop boundary the scheduler is normally a
+      // pass ahead already (_schedWrapped) and must not be re-aimed.
+      if (wrapping) {
+        to = this.loopStart;
+        if (this._schedWrapped) {
+          this._schedWrapped = false;
+        } else {
+          // Scheduler never reached the boundary (a stalled timer jumped the
+          // heard beat over it): flush the rest of the old pass now, then
+          // re-aim at the loop start like the legacy wrap does.
+          this._fire(this.loopEnd, -EPS);
+          this._cursor = this._indexAt(this.loopStart);
+          this._schedBeat = this.loopStart;
+        }
+      }
+      this.beat = to;
+      this._scheduleAhead(to, audioNow);
+    } else if (wrapping) {
       this._fire(this.loopEnd, -EPS); // the loop end itself belongs to the next pass
       to = this.loopStart;
       this.beat = to;
@@ -291,6 +380,96 @@ class Sequencer {
     this._schedule();
   }
 
+  /**
+   * The audio clock, when scheduling ahead is possible: every routed
+   * instrument opts in (`schedulesAhead`) and exposes a context clock, so no
+   * instrument would play a future `when` immediately. Otherwise null, and
+   * the tick fires events the moment the cursor crosses them, exactly as
+   * before lookahead existed (this is also the jsdom/test-mock path).
+   */
+  _audioNow() {
+    if (!this.lookaheadMs) return null;
+    const instruments = this._allInstruments();
+    if (!instruments.length) return null;
+    let time = null;
+    for (const instrument of instruments) {
+      if (!instrument.schedulesAhead || !instrument.context
+        || typeof instrument.context.currentTime !== 'number') return null;
+      // One shared AudioContext in practice (the manager is a singleton).
+      time = instrument.context.currentTime;
+    }
+    return time;
+  }
+
+  /**
+   * Hand every event within lookaheadMs of the heard beat to its instrument
+   * with an exact audio-clock onset. Tempo is sampled at the heard beat —
+   * over a 100ms horizon a rit/accel drifts it by well under a tick.
+   * Handles at most one A-B wrap per call (later ticks catch up when the
+   * loop is shorter than the horizon).
+   */
+  _scheduleAhead(heard, audioNow) {
+    const spb = this.secondsPerBeat(heard);
+    const lookBeats = (this.lookaheadMs / 1000) / spb;
+
+    if (!this.looping) {
+      const target = heard + lookBeats;
+      while (this._cursor < this.events.length
+        && this.events[this._cursor].beat < target + FIRE_SLOP) {
+        const event = this.events[this._cursor];
+        this._sound(event, audioNow + Math.max(0, event.beat - heard) * spb);
+        this._cursor += 1;
+      }
+      this._schedBeat = Math.max(this._schedBeat, target);
+      return;
+    }
+
+    if (heard >= this.loopEnd - EPS) return; // snap-back lands next tick
+    const wrapTime = audioNow + (this.loopEnd - heard) * spb;
+    const loopLength = this.loopEnd - this.loopStart;
+
+    if (!this._schedWrapped) {
+      const target = heard + lookBeats;
+      // Old pass, up to the boundary (the loopEnd event belongs to the next).
+      const limit = target >= this.loopEnd - EPS ? this.loopEnd - EPS : target + FIRE_SLOP;
+      while (this._cursor < this.events.length && this.events[this._cursor].beat < limit) {
+        const event = this.events[this._cursor];
+        this._sound(event, audioNow + Math.max(0, event.beat - heard) * spb);
+        this._cursor += 1;
+      }
+      if (target < this.loopEnd - EPS) {
+        this._schedBeat = Math.max(this._schedBeat, target);
+        return;
+      }
+      // The horizon crosses the boundary: wrap the scheduler into the next
+      // pass and keep going from the loop start.
+      this._cursor = this._indexAt(this.loopStart);
+      this._schedBeat = this.loopStart;
+      this._schedWrapped = true;
+      const leftover = Math.min(target - this.loopEnd, loopLength);
+      this._scheduleWrappedPass(this.loopStart + leftover, wrapTime);
+      return;
+    }
+
+    // Scheduler already in the next pass; extend it as the heard beat closes
+    // in on the boundary.
+    const targetNew = this.loopStart
+      + Math.min(Math.max(0, heard + lookBeats - this.loopEnd), loopLength);
+    this._scheduleWrappedPass(targetNew, wrapTime);
+  }
+
+  /** Schedule next-pass events up to `target`, onsets relative to `wrapTime`. */
+  _scheduleWrappedPass(target, wrapTime) {
+    const spb = this.secondsPerBeat(this.loopStart);
+    while (this._cursor < this.events.length
+      && this.events[this._cursor].beat < target + FIRE_SLOP) {
+      const event = this.events[this._cursor];
+      this._sound(event, wrapTime + Math.max(0, event.beat - this.loopStart) * spb);
+      this._cursor += 1;
+    }
+    this._schedBeat = Math.max(this._schedBeat, target);
+  }
+
   /** Sound every pending event before `until` (+ slop). */
   _fire(until, slop) {
     while (this._cursor < this.events.length
@@ -309,12 +488,15 @@ class Sequencer {
     }
   }
 
-  _sound(event) {
+  _sound(event, when) {
     if (this.muted.has(event.voiceId)) return;
     const instrument = this.instruments[event.voiceId] || this.instrument;
     if (!instrument) return;
     const ms = event.durationBeats * this.secondsPerBeat(event.beat) * 1000;
-    instrument.startNote(event.pitch, ms, this._velocityFor(event));
+    // Legacy (fire-on-cross) keeps the exact 3-arg call shape — consumers spy
+    // on startNote and a trailing `undefined` would show up in their asserts.
+    if (when === undefined) instrument.startNote(event.pitch, ms, this._velocityFor(event));
+    else instrument.startNote(event.pitch, ms, this._velocityFor(event), when);
   }
 
   _velocityFor(event) {
@@ -352,6 +534,18 @@ class Sequencer {
     while (lo < hi) {
       const mid = (lo + hi) >> 1;
       if (this.events[mid].beat < beat - EPS) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  }
+
+  /** First event index strictly after `beat` (events there already sounded). */
+  _indexPast(beat) {
+    let lo = 0;
+    let hi = this.events.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (this.events[mid].beat <= beat + FIRE_SLOP) lo = mid + 1;
       else hi = mid;
     }
     return lo;

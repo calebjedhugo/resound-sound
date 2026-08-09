@@ -359,10 +359,35 @@ class Instrument {
    * @param {number} duration - Duration in milliseconds
    * @param {number} [velocity] - Strike velocity 0-1; only instruments that
    *   model it (e.g. Piano) do anything with it
+   * @param {number} [when] - Audio-clock onset (context.currentTime seconds).
+   *   Only instruments that set `schedulesAhead = true` honor it (e.g. Piano);
+   *   the Sequencer checks that flag before scheduling ahead, so an
+   *   instrument that ignores `when` is never handed a future onset.
    */
   // eslint-disable-next-line class-methods-use-this, no-unused-vars
-  startNote(pitch, duration, velocity) {
+  startNote(pitch, duration, velocity, when) {
     throw new Error('startNote() must be implemented by subclass');
+  }
+
+  /**
+   * Cancel notes that were scheduled ahead (startNote with a future `when`)
+   * but have not begun sounding. Notes already sounding are left to ring —
+   * this is the seek-while-playing contract: the ear keeps what it already
+   * heard, and only the not-yet-heard future is discarded.
+   */
+  cancelScheduled() {
+    const { currentTime } = this.context;
+    this.activeOscillators.forEach((oscillatorData) => {
+      const { oscillator, gainNode, startTime } = oscillatorData;
+      if (startTime === undefined || startTime <= currentTime + 1e-3) return;
+      try {
+        oscillator.stop(currentTime); // started-but-not-sounding: cancels outright
+        gainNode.disconnect();
+      } catch (e) {
+        // Source may already be stopped or the graph torn down.
+      }
+      this.activeOscillators.delete(oscillatorData);
+    });
   }
 
   /**
@@ -371,9 +396,11 @@ class Instrument {
    * @param {OscillatorNode} oscillator
    * @param {GainNode} gainNode
    * @param {number} duration - Duration in milliseconds
+   * @param {number} [startTime] - Audio-clock onset, when scheduled ahead;
+   *   lets cancelScheduled() tell a not-yet-sounding note from a ringing one
    */
-  trackOscillator(oscillator, gainNode, duration) {
-    const oscillatorData = { oscillator, gainNode };
+  trackOscillator(oscillator, gainNode, duration, startTime) {
+    const oscillatorData = { oscillator, gainNode, startTime };
 
     // Add to active set
     this.activeOscillators.add(oscillatorData);

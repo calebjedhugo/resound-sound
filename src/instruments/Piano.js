@@ -95,6 +95,10 @@ class Piano extends Instrument {
     super(id);
     const opts = options || {};
 
+    // startNote honors a future `when` onset — the Sequencer checks this flag
+    // before scheduling notes ahead on the audio clock.
+    this.schedulesAhead = true;
+
     this.release = 0.06; // damper time at note end (s)
     this.filterCutoff = BRIGHTNESS_HZ; // soundboard brightness (editor "cutoff")
     this.hammerLevel = 0.105;
@@ -365,14 +369,14 @@ class Piano extends Instrument {
    * (the full additive synth). velocity (0-1, default mf) scales loudness,
    * brightness, and attack.
    */
-  startNote(pitch, duration, velocity = DEFAULT_VELOCITY) {
+  startNote(pitch, duration, velocity = DEFAULT_VELOCITY, when) {
     const f0 = getFrequency(pitch);
     const v = clampNum(velocity, 0, 1);
     const li = this.nearestLayerIndex(v);
     const midi = this.midiFromFreq(f0);
     const buffer = this._cacheGet(this.cacheKey(midi, li));
     if (buffer) {
-      this.playSampledNote(buffer, li, v, duration);
+      this.playSampledNote(buffer, li, v, duration, when);
       return;
     }
     // Un-warmed: render live now, and (by default) render this buffer in the
@@ -380,8 +384,16 @@ class Piano extends Instrument {
     // goes through the warm pool (front of queue), NOT straight to
     // ensureBuffer: an un-warmed chord run would otherwise spawn one
     // OfflineAudioContext per note with no bound, mid-playback.
-    this.playLiveNote(f0, v, duration);
+    this.playLiveNote(f0, v, duration, when);
     if (this.autoSample) this._queueRender(midi, li, f0);
+  }
+
+  /** The audio-clock onset for a note: `when` if it's still in the future,
+   *  otherwise now — a late-arriving schedule plays immediately, never in
+   *  the past (Web Audio would clamp anyway; this keeps the math honest). */
+  _onsetTime(when) {
+    const now = this.context.currentTime;
+    return when !== undefined ? Math.max(when, now) : now;
   }
 
   /**
@@ -413,8 +425,9 @@ class Piano extends Instrument {
   }
 
   /** Full additive synth: one decaying oscillator per voice + hammer. */
-  playLiveNote(f0, velocity, duration) {
-    const t0 = this.context.currentTime;
+  playLiveNote(f0, velocity, duration, when) {
+    const t0 = this._onsetTime(when);
+    const lead = (t0 - this.context.currentTime) * 1000;
     const durSec = Math.max(0.02, duration / 1000);
 
     const volumeGain = this.context.createGain();
@@ -424,12 +437,13 @@ class Piano extends Instrument {
     const oscillators = this.scheduleNote(
       this.context, volumeGain, this.phaseBank, this.noiseBuffer, f0, velocity, durSec, t0,
     );
-    oscillators.forEach((osc) => this.trackOscillator(osc, volumeGain, duration));
+    oscillators.forEach((osc) => this.trackOscillator(osc, volumeGain, duration + lead, t0));
   }
 
   /** Cheap playback: a single BufferSourceNode from a warm() buffer. */
-  playSampledNote(buffer, layerIndex, velocity, duration) {
-    const t0 = this.context.currentTime;
+  playSampledNote(buffer, layerIndex, velocity, duration, when) {
+    const t0 = this._onsetTime(when);
+    const lead = (t0 - this.context.currentTime) * 1000;
     const durSec = Math.max(0.02, duration / 1000);
 
     // Continuous loudness despite layered timbre: trim to the exact velocity.
@@ -452,7 +466,7 @@ class Piano extends Instrument {
     gain.gain.exponentialRampToValueAtTime(0.0001, noteEnd + release);
     source.stop(noteEnd + release + 0.01);
 
-    this.trackOscillator(source, gain, duration);
+    this.trackOscillator(source, gain, duration + lead, t0);
   }
 
   // --- Optional sampled-playback cache (opt-in via warm()) --------------------

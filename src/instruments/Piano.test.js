@@ -622,6 +622,58 @@ describe('Piano playback', () => {
       expect(piano.activeOscillators.size).toBe(0);
     });
 
+    it('honors a future `when`: sampled playback starts on the audio clock', async () => {
+      const piano = new Piano('p', { layers: [0.7] });
+      await piano.warm(['C/4']);
+
+      const context = audioContextManager.getContext();
+      jest.restoreAllMocks();
+      const sources = [];
+      const origSrc = context.createBufferSource.bind(context);
+      jest.spyOn(context, 'createBufferSource').mockImplementation(() => {
+        const n = origSrc();
+        jest.spyOn(n, 'start');
+        sources.push(n);
+        return n;
+      });
+
+      const when = context.currentTime + 0.5;
+      piano.startNote('C/4', 100, 0.7, when);
+      expect(sources).toHaveLength(1);
+      expect(sources[0].start).toHaveBeenCalledWith(when);
+      // The tracked note remembers its onset so cancelScheduled can tell a
+      // not-yet-sounding note from a ringing one.
+      const tracked = [...piano.activeOscillators][0];
+      expect(tracked.startTime).toBe(when);
+    });
+
+    it('cancelScheduled stops scheduled-but-unstarted notes and leaves ringing ones', async () => {
+      const piano = new Piano('p', { layers: [0.7] });
+      await piano.warm(['C/4', 'D/4']);
+
+      const context = audioContextManager.getContext();
+      jest.restoreAllMocks();
+      const sources = [];
+      const origSrc = context.createBufferSource.bind(context);
+      jest.spyOn(context, 'createBufferSource').mockImplementation(() => {
+        const n = origSrc();
+        jest.spyOn(n, 'stop');
+        sources.push(n);
+        return n;
+      });
+
+      piano.startNote('C/4', 500, 0.7); // sounding now
+      piano.startNote('D/4', 500, 0.7, context.currentTime + 0.5); // scheduled ahead
+      expect(piano.activeOscillators.size).toBe(2);
+
+      piano.cancelScheduled();
+      // Only the future note is taken back; the ringing one keeps its
+      // originally scheduled damper stop.
+      expect(piano.activeOscillators.size).toBe(1);
+      expect([...piano.activeOscillators][0].startTime).toBeLessThanOrEqual(context.currentTime);
+      expect(sources[1].stop).toHaveBeenCalledWith(context.currentTime);
+    });
+
     it('stopAll clears pending tracking timers', () => {
       const piano = new Piano('p', { autoSample: false });
       piano.startNote('C/4', 500);
