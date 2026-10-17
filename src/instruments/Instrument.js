@@ -395,11 +395,11 @@ class Instrument {
   cancelScheduled() {
     const { currentTime } = this.context;
     this.activeOscillators.forEach((oscillatorData) => {
-      const { oscillator, gainNode, startTime } = oscillatorData;
+      const { oscillator, noteOutput, startTime } = oscillatorData;
       if (startTime === undefined || startTime <= currentTime + 1e-3) return;
       try {
         oscillator.stop(currentTime); // started-but-not-sounding: cancels outright
-        gainNode.disconnect();
+        noteOutput.disconnect();
       } catch (e) {
         // Source may already be stopped or the graph torn down.
       }
@@ -411,13 +411,18 @@ class Instrument {
    * Helper to track an oscillator so it can be stopped later
    * Call this from subclass startNote() implementation
    * @param {OscillatorNode} oscillator
-   * @param {GainNode} gainNode
+   * @param {GainNode} gainNode - The volume gain the oscillator plays
+   *   through: what updateVolume() ramps and stopAll() fades
    * @param {number} duration - Duration in milliseconds
    * @param {number} [startTime] - Audio-clock onset, when scheduled ahead;
    *   lets cancelScheduled() tell a not-yet-sounding note from a ringing one
+   * @param {AudioNode} [noteOutput] - The node joining this note to the rest
+   *   of the graph, disconnected once the note is done. Defaults to
+   *   gainNode; an instrument whose notes share one volume gain (Random)
+   *   passes each note's own last node instead.
    */
-  trackOscillator(oscillator, gainNode, duration, startTime) {
-    const oscillatorData = { oscillator, gainNode, startTime };
+  trackOscillator(oscillator, gainNode, duration, startTime, noteOutput = gainNode) {
+    const oscillatorData = { oscillator, gainNode, startTime, noteOutput };
 
     // Add to active set
     this.activeOscillators.add(oscillatorData);
@@ -432,7 +437,7 @@ class Instrument {
     // and disconnecting a disconnected node is a no-op.
     oscillator.onended = () => {
       try {
-        gainNode.disconnect();
+        noteOutput.disconnect();
       } catch (e) {
         // Node may already be disconnected (shared gain, or context torn down).
       }

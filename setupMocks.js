@@ -61,7 +61,8 @@ class MockOscillatorNode {
 }
 
 class MockBiquadFilterNode {
-  constructor() {
+  constructor(sampleRate = 44100) {
+    this.sampleRate = sampleRate;
     this.type = 'lowpass';
     this.frequency = {
       value: 350,
@@ -84,6 +85,29 @@ class MockBiquadFilterNode {
   }
 
   disconnect() {}
+
+  // The spec's lowpass biquad (Q in dB) at the current frequency/Q values,
+  // for code that folds the filter into a periodic wave. Lowpass only.
+  getFrequencyResponse(frequencyHz, magResponse, phaseResponse) {
+    const theta = (2 * Math.PI * this.frequency.value) / this.sampleRate;
+    const alpha = Math.sin(theta) / (2 * 10 ** (this.Q.value / 20));
+    const cos = Math.cos(theta);
+    const b = [(1 - cos) / 2, 1 - cos, (1 - cos) / 2];
+    const a = [1 + alpha, -2 * cos, 1 - alpha];
+    // H(e^jw) = (b0 + b1 e^-jw + b2 e^-2jw) / (a0 + a1 e^-jw + a2 e^-2jw)
+    const at = (c, w) => [c[0] + c[1] * Math.cos(w) + c[2] * Math.cos(2 * w),
+      -(c[1] * Math.sin(w) + c[2] * Math.sin(2 * w))];
+    frequencyHz.forEach((f, i) => {
+      const w = (2 * Math.PI * f) / this.sampleRate;
+      const [nr, ni] = at(b, w);
+      const [dr, di] = at(a, w);
+      const den = dr * dr + di * di;
+      const hr = (nr * dr + ni * di) / den;
+      const hi = (ni * dr - nr * di) / den;
+      magResponse[i] = Math.hypot(hr, hi);
+      phaseResponse[i] = Math.atan2(hi, hr);
+    });
+  }
 }
 
 class MockWaveShaperNode {
@@ -124,7 +148,7 @@ class MockAudioContext {
   }
 
   createBiquadFilter() {
-    return new MockBiquadFilterNode();
+    return new MockBiquadFilterNode(this.sampleRate);
   }
 
   createBuffer(channels, length, sampleRate) {
@@ -133,6 +157,7 @@ class MockAudioContext {
       numberOfChannels: channels,
       length,
       sampleRate: sampleRate || this.sampleRate,
+      duration: length / (sampleRate || this.sampleRate),
       getChannelData: () => channelData,
     };
   }
