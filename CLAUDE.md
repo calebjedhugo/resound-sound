@@ -13,6 +13,7 @@ Publishing is **manual and local** — it needs `npm login` with publish rights 
     - **Default = lazy auto-cache:** first strike of a pitch renders live, then its buffer renders in the background (`OfflineAudioContext`, reusing `scheduleNote()`) into velocity layers (default 4) + loudness trim, so later strikes are cheap. Auto-disables where `OfflineAudioContext` is unavailable (e.g. jsdom test envs) → stays live, so consumers/tests don't break.
     - **`await piano.warm([pitches])`** pre-renders at load — REQUIRED for mobile/dense polyphony to avoid first-hit live spikes.
     - **`new Piano(id, { autoSample: false })`** = pure live (continuous velocity, max fidelity). Also `{ layers, maxCacheBytes (LRU byte budget, default 32MB), maxCacheEntries }`.
+  - `Random` — ONE oscillator per note playing a cached per-pitch `PeriodicWave` (the built-in wave with its lowpass folded in + the harmonics) plus a few-ms onset buffer (the biquad's start-up transient), through one volume gain shared by the instance's notes. **It must sound exactly like the old oscillator → biquad + harmonic-oscillators graph**: any change to it gets re-nulled against that graph in a real browser (residual ≤ -60 dB; see CHANGELOG). Chrome holds ~0.6 MB of wavetable per (instance, pitch); `warm(pitches)` builds voices ahead (~1 ms each).
 - `src/lib/` — `AudioContextManager` (singleton), `Envelope`, `MusicalClock`, `duration`, `noteFrequencies`.
   - `noteFrequencies.js` — a measured table for C/2–B/5; anything outside it is computed in equal temperament. Accepts `'C/4'` and `'C4'`. Only genuinely unparseable input falls back to A4 with a warning.
   - `instrumentRegistry.js` — `initInstruments()` / `getInstrument()` / `instrumentReady()`: eager page-load construction + warm of sampled instruments, registered by id (`SPEC-init.md`). `getInstrument` is synchronous and says nothing about warming; `instrumentReady(id)` is the awaitable one, for code that didn't start the init (a play button tapped mid-warm).
@@ -23,7 +24,7 @@ Publishing is **manual and local** — it needs `npm login` with publish rights 
 ## Workflows
 
 ```bash
-npm test            # Jest, 111 integration tests — keep these green, they are the safety net
+npm test            # Jest, 141 integration tests — keep these green, they are the safety net
 npm run build       # webpack ESM bundle + tsc declarations to dist/
 npm start           # webpack-watch + tsc-watch + editor on http://localhost:5174
 ```
@@ -60,6 +61,6 @@ Editor only knows the synth topology. Noise-based instruments (Clap-style) still
 
 ## Consumer
 
-`resound-fe` (`~/Development/personal dev work.nosync/resound-fe/`) imports from this package. Six files: `core/{PlaybackManager,ClapManager,GameState}.js`, `entities/{Creature,Fountain}.js`, `createEventListeners.js`. Full suite is 907 tests / 46 suites — keep it green when bumping the package. Verified 2026-08-03 against this repo's `main` via a temporary `file:` link: green, but it needed two mock methods the 0.2.0 Piano uses (`createWaveShaper`, `setPeriodicWave`) that resound-fe's own `helpers/mocks.js` predates. Expect a consumer's Web Audio mock to be the first thing an instrument change breaks.
+`resound-fe` (`~/Development/personal dev work.nosync/resound-fe/`) imports from this package. Six files: `core/{PlaybackManager,ClapManager,GameState}.js`, `entities/{Creature,Fountain}.js`, `createEventListeners.js`. Full suite is 993 tests / 52 suites (2026-10-17) — keep it green when bumping the package. Verified 2026-08-03 against this repo's `main` via a temporary `file:` link: green, but it needed two mock methods the 0.2.0 Piano uses (`createWaveShaper`, `setPeriodicWave`) that resound-fe's own `helpers/mocks.js` predates. Expect a consumer's Web Audio mock to be the first thing an instrument change breaks (`Random` uses `createPeriodicWave`, `createBuffer`, `createBufferSource`; a mock biquad without `getFrequencyResponse` just gets an unfiltered wave).
 
 `singHarmony2` (`~/Development/personal dev work.nosync/singHarmony2/`) drove `initInstruments` and `Sequencer`, and consumes this package as a local `file:` link pending the next publish. Its `src/player.js` is a thin adapter over `Sequencer`; it tests that adapter (`player.test.js`) and runs every song through `buildTimeline` (`songs.render.test.js`), but the audio itself is verified in the browser.
