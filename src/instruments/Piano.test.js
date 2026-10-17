@@ -768,6 +768,17 @@ describe('Piano playback', () => {
         .toBe(Math.ceil(piano.bufferSeconds(getFrequency('C/4')) * 20050));
     });
 
+    it('builds its phase wavetables once for every offline render at a sample rate', async () => {
+      const piano = new Piano('p', { layers: [0.7] });
+      await piano.warm(['C/4']); // the first render may build them
+      const waves = jest.spyOn(OfflineAudioContext.prototype, 'createPeriodicWave');
+
+      await piano.warm(['D/4', 'E/4', 'F/4']);
+
+      expect(piano.sampleBuffers.size).toBe(4);
+      expect(waves).not.toHaveBeenCalled();
+    });
+
     it('bass buffers are longer than treble buffers', () => {
       const piano = new Piano();
       expect(piano.bufferSeconds(getFrequency('C/2')))

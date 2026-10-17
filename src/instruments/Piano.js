@@ -79,6 +79,13 @@ function offlineAudioContextCtor() {
   return null;
 }
 
+// Offline renders' phase banks, one per sample rate, shared by every render.
+// A bank is 16 PeriodicWaves (~14 ms of main thread in Chrome: more than the
+// rest of a render's graph) whose tables depend only on the sample rate, and
+// a render plays the same from a bank built on another context (Chrome
+// 2026-10-17: within 1.8e-7, as close as two renders with their own banks).
+const offlinePhaseBanks = new Map(); // sampleRate -> PeriodicWave[]
+
 function mulberry32(seed) {
   let a = seed >>> 0;
   return () => {
@@ -538,7 +545,11 @@ class Piano extends Instrument {
     if (!OfflineCtor) return Promise.reject(new Error('OfflineAudioContext unavailable'));
 
     const ctx = new OfflineCtor(1, Math.max(1, Math.ceil(seconds * sr)), sr);
-    const phaseBank = this.makePhaseBank(ctx);
+    if (!offlinePhaseBanks.has(sr)) {
+      // Built on a context of its own that never renders
+      offlinePhaseBanks.set(sr, this.makePhaseBank(new OfflineCtor(1, 1, sr)));
+    }
+    const phaseBank = offlinePhaseBanks.get(sr);
     const noiseBuffer = this.makeNoiseBuffer(ctx);
     this.scheduleNote(ctx, ctx.destination, phaseBank, noiseBuffer, f0, layerVel, seconds, 0);
     return ctx.startRendering();
