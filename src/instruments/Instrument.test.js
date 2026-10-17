@@ -1,4 +1,5 @@
 import Instrument from './Instrument';
+import Synth from './Synth';
 
 // Base-class playback semantics, exercised through the documented extension
 // point (a subclass implementing startNote). The concrete-instrument suites
@@ -110,6 +111,83 @@ describe('Instrument', () => {
 
       expect(() => inst.stopAll()).not.toThrow();
       expect(inst.activeOscillators.size).toBe(0);
+    });
+
+    it('fades a gain shared by many oscillators once, and stops every oscillator', () => {
+      const inst = new Recorder();
+      const shared = inst.context.createGain();
+      const oscillators = [{ stop: jest.fn() }, { stop: jest.fn() }, { stop: jest.fn() }];
+      oscillators.forEach((osc) => inst.trackOscillator(osc, shared, 1000));
+
+      inst.stopAll(0.05);
+      const end = inst.context.currentTime + 0.05;
+
+      expect(shared.gain.cancelScheduledValues).toHaveBeenCalledTimes(1);
+      expect(shared.gain.linearRampToValueAtTime).toHaveBeenCalledTimes(1);
+      expect(shared.gain.linearRampToValueAtTime).toHaveBeenCalledWith(0, end);
+      oscillators.forEach((osc) => expect(osc.stop).toHaveBeenCalledWith(end));
+    });
+  });
+
+  describe('updateVolume', () => {
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    it('ramps each distinct gain once, however many oscillators play through it', () => {
+      const inst = new Recorder();
+      const shared = inst.context.createGain();
+      const own = inst.context.createGain();
+      inst.trackOscillator({ stop: jest.fn() }, shared, 1000);
+      inst.trackOscillator({ stop: jest.fn() }, shared, 1000);
+      inst.trackOscillator({ stop: jest.fn() }, own, 1000);
+
+      inst.updateVolume(0.4);
+
+      const { currentTime } = inst.context;
+      expect(shared.gain.setTargetAtTime).toHaveBeenCalledTimes(1);
+      expect(shared.gain.setTargetAtTime).toHaveBeenCalledWith(0.4, currentTime, 0.01);
+      expect(own.gain.setTargetAtTime).toHaveBeenCalledTimes(1);
+      expect(inst.volumeMultiplier).toBe(0.4);
+    });
+
+    it('schedules nothing for a volume it already has', () => {
+      const inst = new Recorder();
+      const gainNode = inst.context.createGain();
+      inst.trackOscillator({ stop: jest.fn() }, gainNode, 1000);
+
+      inst.updateVolume(0.4);
+      inst.updateVolume(0.4);
+      inst.updateVolume(0.4);
+
+      expect(gainNode.gain.setTargetAtTime).toHaveBeenCalledTimes(1);
+    });
+
+    it('starts a note played after a change at the new volume, so later frames owe it nothing', async () => {
+      // The skip above relies on this: a gain created after the last change
+      // already sits at the current volume (the per-frame re-ramp it no
+      // longer gets would have been a no-op).
+      const gains = [];
+      const synth = new Synth();
+      const origGain = synth.context.createGain.bind(synth.context);
+      jest.spyOn(synth.context, 'createGain').mockImplementation(() => {
+        const node = origGain();
+        gains.push(node);
+        return node;
+      });
+      synth.updateVolume(0.25);
+
+      const playPromise = synth.play({ data: [{ pitch: 'A/4', length: '1/4' }], tempo: 120, basis: 4 });
+      await Promise.resolve();
+      synth.updateVolume(0.25);
+
+      // Synth builds the volume gain first, then the envelope
+      const volumeGain = gains[0];
+      expect(volumeGain.gain.value).toBe(0.25);
+      expect(volumeGain.gain.setTargetAtTime).not.toHaveBeenCalled();
+
+      await jest.advanceTimersByTimeAsync(QUARTER_AT_120);
+      await playPromise;
     });
   });
 

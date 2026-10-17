@@ -13,6 +13,8 @@ class MockGainNode {
       // Instrument.stopAll() calls this first, inside a try/catch. Without it
       // the whole fade-out silently became a no-op under test.
       cancelScheduledValues: jest.fn(),
+      // Instrument.updateVolume()'s ramp, likewise swallowed if missing.
+      setTargetAtTime: jest.fn(),
     };
   }
 

@@ -286,16 +286,20 @@ class Instrument {
   stopAll(fadeTime = 0.01) {
     const { currentTime } = this.context;
 
-    this.activeOscillators.forEach((oscillatorData) => {
-      const { oscillator, gainNode } = oscillatorData;
-
+    // Fade out to prevent clicks
+    this.trackedGains().forEach((gainNode) => {
       try {
-        // Fade out to prevent clicks
         gainNode.gain.cancelScheduledValues(currentTime);
         gainNode.gain.setValueAtTime(gainNode.gain.value, currentTime);
         gainNode.gain.linearRampToValueAtTime(0, currentTime + fadeTime);
+      } catch (e) {
+        // Gain node might be disconnected
+      }
+    });
 
-        // Stop oscillator after fade
+    // Stop each oscillator after the fade
+    this.activeOscillators.forEach(({ oscillator }) => {
+      try {
         oscillator.stop(currentTime + fadeTime);
       } catch (e) {
         // Oscillator might already be stopped
@@ -336,13 +340,14 @@ class Instrument {
    * @param {number} volumeMultiplier - Volume multiplier (0.0 to 1.0)
    */
   updateVolume(volumeMultiplier) {
+    // Most frames bring the SAME volume: every tracked gain started at it or
+    // is already ramping to it, so there is nothing to schedule.
+    if (volumeMultiplier === this.volumeMultiplier) return;
     this.volumeMultiplier = volumeMultiplier;
 
     const { currentTime } = this.context;
 
-    this.activeOscillators.forEach((oscillatorData) => {
-      const { gainNode } = oscillatorData;
-
+    this.trackedGains().forEach((gainNode) => {
       try {
         // Smooth ramp to prevent clicks (10ms transition)
         gainNode.gain.setTargetAtTime(volumeMultiplier, currentTime, 0.01);
@@ -350,6 +355,18 @@ class Instrument {
         // Gain node might be disconnected
       }
     });
+  }
+
+  /**
+   * The distinct gains the tracked oscillators play through, each once: a
+   * live Piano note routes ~40 oscillators through one volume gain, and a
+   * Random routes all of its notes through one.
+   * @returns {Set<GainNode>}
+   */
+  trackedGains() {
+    const gains = new Set();
+    this.activeOscillators.forEach(({ gainNode }) => gains.add(gainNode));
+    return gains;
   }
 
   /**
