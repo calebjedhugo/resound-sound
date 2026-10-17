@@ -11,7 +11,7 @@ Publishing is **manual and local** — it needs `npm login` with publish rights 
 - `src/instruments/` — `Instrument` base + concrete classes (`Synth`, `Piano`, `Fountain`, `Random`, `Clap`). Each subclass implements `startNote(pitch, duration, velocity?)`.
   - `Piano` — additive concert-grand synth (~15–46 oscillators/note; velocity-sensitive; continuous per-pitch tuning), tuned against real grand samples. Plays back from cheap pre-rendered `AudioBuffer`s (ONE `BufferSourceNode`/note, ~40× cheaper) when available; falls back to the live additive synth otherwise.
     - **Default = lazy auto-cache:** first strike of a pitch renders live, then its buffer renders in the background (`OfflineAudioContext`, reusing `scheduleNote()`) into velocity layers (default 4) + loudness trim, so later strikes are cheap. Auto-disables where `OfflineAudioContext` is unavailable (e.g. jsdom test envs) → stays live, so consumers/tests don't break.
-    - **`await piano.warm([pitches])`** pre-renders at load — REQUIRED for mobile/dense polyphony to avoid first-hit live spikes.
+    - **`await piano.warm([pitches])`** pre-renders at load — REQUIRED for mobile/dense polyphony to avoid first-hit live spikes. Offline renders share one module-level phase bank per sample rate (building one is ~14 ms).
     - **`new Piano(id, { autoSample: false })`** = pure live (continuous velocity, max fidelity). Also `{ layers, maxCacheBytes (LRU byte budget, default 32MB), maxCacheEntries }`.
   - `Random` — ONE oscillator per note playing a cached per-pitch `PeriodicWave` (the built-in wave with its lowpass folded in + the harmonics) plus a few-ms onset buffer (the biquad's start-up transient), through one volume gain shared by the instance's notes. **It must sound exactly like the old oscillator → biquad + harmonic-oscillators graph**: any change to it gets re-nulled against that graph in a real browser (residual ≤ -60 dB; see CHANGELOG). Chrome holds ~0.6 MB of wavetable per (instance, pitch); `warm(pitches)` builds voices ahead (~1 ms each).
 - `src/lib/` — `AudioContextManager` (singleton), `Envelope`, `MusicalClock`, `duration`, `noteFrequencies`.
@@ -24,7 +24,7 @@ Publishing is **manual and local** — it needs `npm login` with publish rights 
 ## Workflows
 
 ```bash
-npm test            # Jest, 141 integration tests — keep these green, they are the safety net
+npm test            # Jest, 142 integration tests — keep these green, they are the safety net
 npm run build       # webpack ESM bundle + tsc declarations to dist/
 npm start           # webpack-watch + tsc-watch + editor on http://localhost:5174
 ```
