@@ -48,6 +48,57 @@ function captureGraph() {
   return { context, oscillators, gains, waves, sources, filters };
 }
 
+// What a graph sounds like to the browser: the tree of nodes feeding the
+// destination (each node's inputs in the order they were connected), with
+// every call made on each node and on its AudioParams: the times and values
+// of every automation event, and every start and stop. Waves and buffers by
+// content, so two instances with one timbre compare equal.
+function soundingGraph({ context, oscillators, gains, sources, filters, waves }) {
+  const nodes = [...oscillators, ...gains, ...sources, ...filters];
+  const edges = nodes.flatMap((node) =>
+    node.connect.mock.calls.map(([to], i) => ({
+      from: node,
+      to,
+      order: node.connect.mock.invocationCallOrder[i],
+    }))
+  );
+  const events = (param) =>
+    Object.fromEntries(
+      Object.entries(param)
+        .filter(([, method]) => jest.isMockFunction(method) && method.mock.calls.length > 0)
+        .map(([name, method]) => [name, method.mock.calls])
+    );
+  const describe = (node) => {
+    const inputs = edges
+      .filter(({ to }) => to === node)
+      .sort((a, b) => a.order - b.order)
+      .map(({ from }) => describe(from));
+    if (gains.includes(node)) {
+      const { value } = node.gain;
+      const disconnects = node.disconnect.mock.calls.length;
+      return { gain: events(node.gain), value, disconnects, inputs };
+    }
+    if (oscillators.includes(node)) {
+      const wave = node.setPeriodicWave.mock.calls.map(([periodic]) => {
+        const { real, imag, options } = waves.find((built) => built.wave === periodic);
+        return { real, imag, options };
+      });
+      const { type } = node;
+      const [start, stop] = [node.start.mock.calls, node.stop.mock.calls];
+      return { type, wave, frequency: events(node.frequency), start, stop, inputs };
+    }
+    if (sources.includes(node)) {
+      const buffer = Array.from(node.buffer.getChannelData(0));
+      return { buffer, start: node.start.mock.calls, stop: node.stop.mock.calls, inputs };
+    }
+    if (filters.includes(node)) {
+      return { type: node.type, frequency: events(node.frequency), inputs };
+    }
+    return { inputs }; // the destination
+  };
+  return describe(context.destination);
+}
+
 // Every object reachable from a root through own properties, Map and Set
 // entries: what a garbage collector would keep alive for a live instance
 // (the AudioContext is shared, not the instance's)
@@ -464,10 +515,195 @@ describe('Random instrument', () => {
     const before = counts();
 
     inst.warm(['C/5']); // a prewarm job still queued for it
+    inst.prepare(['C/5']); // and one building its next song
     inst.startNote('C/5', 500); // a scheduler driving it directly
     await playAndFinish(inst, A4);
 
     expect(counts()).toEqual(before);
     expect(inst.isWarm(['C/5'])).toBe(true); // nothing left for a warm() to build
+    expect(inst.isPrepared(['C/5'])).toBe(true); // nor for a prepare()
+  });
+
+  describe('notes prepared ahead', () => {
+    const counts = () =>
+      [graph.oscillators, graph.gains, graph.sources, graph.waves, graph.filters].map(
+        (nodes) => nodes.length
+      );
+
+    // The same notes, volume changes and stop on one timbre, with or without
+    // prepare() building notes ahead of them: what was built and scheduled,
+    // and how many oscillators were built in all and how many ever started
+    async function perform(prepareAhead) {
+      jest.restoreAllMocks();
+      jest.spyOn(Math, 'random').mockReturnValue(0.5); // a triangle at 2750 Hz, harmonics 2x/3x
+      const built = captureGraph();
+      const inst = new Random('r1');
+      const at = (time) => {
+        built.context.currentTime = time;
+      };
+      const ahead = (pitches) => {
+        if (prepareAhead) inst.prepare(pitches);
+      };
+
+      inst.updateVolume(0.8);
+      ahead(['C/4', 'E/4', 'C/4']); // a song's notes, well before it
+      at(0.1);
+      inst.startNote('C/4', 300);
+      at(0.2);
+      inst.startNote('E/4', 500); // joins the sounding C/4
+      inst.updateVolume(0.4);
+      at(0.45);
+      inst.startNote('C/4', 250);
+      ahead(['G/4', 'G/4']); // never used: the stop lets them go
+      at(1);
+      inst.stop();
+      ahead(['B/4']); // and a volume gain for it: never used either
+      at(1.5);
+      inst.stop();
+      ahead(['A/4']); // and the fresh volume gain it plays through
+      inst.updateVolume(0.6);
+      at(2);
+      inst.startNote('A/4', 400);
+      at(2.1);
+      inst.startNote('G/4', 400); // built at its onset either way
+      ahead(['C/4', 'G/4', 'E/4']);
+      at(3);
+      const phrase = inst.play({
+        data: [
+          [
+            { pitch: 'C/4', length: '1/4' },
+            { pitch: 'G/4', length: '1/2' },
+          ],
+          { pitch: 'E/4', length: '1/8' },
+        ],
+        tempo: 120,
+        basis: 4,
+      });
+      await Promise.resolve();
+      await jest.advanceTimersByTimeAsync(2000);
+      await phrase;
+
+      return {
+        sounding: soundingGraph(built),
+        oscillators: built.oscillators.length,
+        started: built.oscillators.filter((osc) => osc.start.mock.calls.length > 0).length,
+        untouched: built.oscillators.filter(
+          (osc) =>
+            [osc.connect, osc.start, osc.stop, osc.frequency.setValueAtTime].every(
+              (method) => method.mock.calls.length === 0
+            )
+        ).length,
+        untouchedGains: built.gains.filter(
+          (gain) =>
+            [gain.connect, gain.disconnect, ...Object.values(gain.gain)]
+              .filter((method) => jest.isMockFunction(method))
+              .every((method) => method.mock.calls.length === 0) && gain.gain.value === 1
+        ).length,
+      };
+    }
+
+    it('sound exactly as notes built at their onsets: the same nodes, connections and scheduled events', async () => {
+      const builtAtOnset = await perform(false);
+      const preparedAhead = await perform(true);
+
+      expect(preparedAhead.sounding).toEqual(builtAtOnset.sounding);
+      // (A walk that missed the notes would pass: it reaches all eight)
+      expect(builtAtOnset.started).toBe(8);
+      // What was prepared and never used (two G/4s, a B/4 and its volume
+      // gain) was never started, connected, tuned or automated
+      expect(preparedAhead.oscillators).toBe(builtAtOnset.oscillators + 3);
+      expect(preparedAhead.started).toBe(builtAtOnset.started);
+      expect(preparedAhead.untouched).toBe(3);
+      expect(builtAtOnset.untouchedGains).toBe(0);
+      expect(preparedAhead.untouchedGains).toBe(3 + 1);
+    });
+
+    it('start without building a node: everything a note builds was built ahead', () => {
+      const inst = new Random('r1');
+      inst.prepare(['A/4', 'C/5']); // the volume gain notes share too
+      const before = counts();
+
+      inst.startNote('A/4', 500);
+      inst.startNote('C/5', 500);
+      expect(counts()).toEqual(before);
+
+      inst.startNote('A/4', 500); // none left for it: built as it starts
+      expect(graph.oscillators).toHaveLength(before[0] + 1);
+
+      inst.stop(); // retires the volume gain
+      inst.prepare(['C/5']);
+      const afterStop = counts();
+      inst.startNote('C/5', 500);
+      expect(counts()).toEqual(afterStop);
+    });
+
+    it('are one per entry, counting the notes prepared already', () => {
+      const inst = new Random('r1');
+      expect(inst.isPrepared(['A/4'])).toBe(false);
+
+      inst.prepare(['A/4', 'C/5', 'A/4']);
+      expect(graph.oscillators).toHaveLength(3);
+      expect(graph.waves).toHaveLength(2); // the voices too, once per pitch
+      expect(inst.isPrepared(['A/4', 'A/4', 'C/5'])).toBe(true);
+      expect(inst.isPrepared(['A/4', 'A/4', 'A/4'])).toBe(false);
+
+      inst.prepare(['A/4', 'A/4']); // both there already
+      expect(graph.oscillators).toHaveLength(3);
+
+      inst.startNote('A/4', 500);
+      expect(inst.isPrepared(['A/4', 'A/4'])).toBe(false);
+      inst.prepare(['A/4', 'A/4']);
+      expect(graph.oscillators).toHaveLength(4); // a replacement for the one it played
+    });
+
+    it.each([
+      ['stopped', (inst) => inst.stop()],
+      ['paused', (inst) => inst.pause()],
+      ['disposed', (inst) => inst.dispose()],
+    ])('are let go unused when the instrument is %s', async (_, end) => {
+      const inst = new Random('r1');
+      const playPromise = inst.play({ data: A4, tempo: 120, basis: 4 });
+      await Promise.resolve();
+      inst.prepare(['A/4', 'C/5']);
+      const prepared = graph.oscillators.slice(1);
+      // (A broken walk would pass the check below: it does reach them now)
+      prepared.forEach((osc) => expect(reachableFrom(inst, graph.context).has(osc)).toBe(true));
+
+      end(inst);
+
+      const left = reachableFrom(inst, graph.context);
+      prepared.forEach((osc) => expect(left.has(osc)).toBe(false));
+      expect(inst.isPrepared(['A/4'])).toBe(inst.disposed); // nothing to build once disposed
+      await jest.advanceTimersByTimeAsync(QUARTER_AT_120);
+      await playPromise;
+
+      // A later note never starts one of them
+      inst.startNote('C/5', 500);
+      prepared.forEach((osc) => expect(osc.start).not.toHaveBeenCalled());
+    });
+
+    it('let go of the volume gain prepared for them when the instrument stops', () => {
+      const inst = new Random('r1');
+      inst.prepare(['A/4']); // no volume gain is live yet
+      const spare = graph.gains[graph.gains.length - 1]; // built after the note's envelope
+      expect(reachableFrom(inst, graph.context).has(spare)).toBe(true);
+
+      inst.stop();
+
+      expect(reachableFrom(inst, graph.context).has(spare)).toBe(false);
+      inst.startNote('A/4', 500);
+      expect(spare.connect).not.toHaveBeenCalled();
+    });
+
+    it('are none above 88.2 kHz, where a note builds its graph as it starts', async () => {
+      graph.context.sampleRate = 96000;
+      const inst = new Random('r1');
+      inst.prepare(['A/4']);
+
+      expect(counts()).toEqual([0, 0, 0, 0, 0]);
+      expect(inst.isPrepared(['A/4'])).toBe(true);
+      await playAndFinish(inst, A4);
+      expect(graph.filters).toHaveLength(1); // the old graph's lowpass
+    });
   });
 });

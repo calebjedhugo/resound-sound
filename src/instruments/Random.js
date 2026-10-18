@@ -165,6 +165,21 @@ const VOLUME_QUIET_SLACK = 0.02; // seconds
 const RETIRED_VOLUME_MARGIN_MS = 100;
 
 /**
+ * How many notes each frequency has among these pitches: a pitch listed
+ * twice (two notes of a song) counts twice.
+ * @param {Array<string|number>} pitches
+ * @returns {Map<number, number>} frequency (Hz) -> notes
+ */
+function notesByFrequency(pitches) {
+  const notes = new Map();
+  pitches.forEach((pitch) => {
+    const frequency = getFrequency(pitch);
+    notes.set(frequency, (notes.get(frequency) || 0) + 1);
+  });
+  return notes;
+}
+
+/**
  * Random instrument with randomized timbre
  * Generates interesting, tonal sounds with consistent timbre
  */
@@ -183,8 +198,13 @@ class Random extends Instrument {
     this._voices = new Map(); // frequency (Hz) -> { wave, onset }
     this._lowpass = null;
 
-    // The volume gain every note plays through (see _volumeGainFor)
+    // Notes built ahead by prepare(), each for one later note at its pitch
+    this._prepared = new Map(); // frequency (Hz) -> [{ oscillator, transient, envelopeGain }]
+
+    // The volume gain every note plays through (see _volumeGainFor), and
+    // one prepare() built for a note to find when none is live
     this._volume = null; // { node: GainNode, busyUntil: audio-clock seconds }
+    this._spareVolume = null; // GainNode, unconnected
   }
 
   /**
@@ -209,6 +229,42 @@ class Random extends Instrument {
   isWarm(pitches) {
     if (this.disposed || !this._playsVoices()) return true;
     return pitches.every((pitch) => this._voices.has(getFrequency(pitch)));
+  }
+
+  /**
+   * Build these notes' nodes now (an oscillator on the pitch's voice, the
+   * onset buffer's source and the envelope gain, unstarted and unconnected;
+   * ~0.1 ms a note, Chrome 152), and the volume gain if none is live, so the
+   * notes that use them only schedule as they start: nothing built depends
+   * on when a note starts. One note per entry (a pitch listed twice has two
+   * ready), counting the notes already prepared; builds the voices too. The
+   * next startNote() of each pitch takes one. stopAll() (pause, stop) and
+   * dispose() let go of what is still unused. Synchronous. Above 88.2 kHz
+   * notes build no voices, so this builds nothing.
+   * @param {Array<string|number>} pitches - e.g. ['C/4', 'E/4', 'C/4']
+   */
+  prepare(pitches) {
+    if (this.disposed || !this._playsVoices()) return;
+    notesByFrequency(pitches).forEach((notes, frequency) => {
+      const prepared = this._prepared.get(frequency) || [];
+      while (prepared.length < notes) prepared.push(this._buildVoiceNote(frequency));
+      this._prepared.set(frequency, prepared);
+    });
+    if (!this._volume && !this._spareVolume) this._spareVolume = this.context.createGain();
+  }
+
+  /**
+   * Whether prepare(pitches) has nothing left to build: each entry's note
+   * is prepared already, or this instance builds none (disposed, or above
+   * 88.2 kHz).
+   * @param {Array<string|number>} pitches - e.g. ['C/4', 'E/4', 'C/4']
+   * @returns {boolean}
+   */
+  isPrepared(pitches) {
+    if (this.disposed || !this._playsVoices()) return true;
+    return [...notesByFrequency(pitches)].every(
+      ([frequency, notes]) => (this._prepared.get(frequency) || []).length >= notes
+    );
   }
 
   /**
@@ -244,16 +300,22 @@ class Random extends Instrument {
   /**
    * One oscillator playing this timbre's wavetable for the pitch, plus the
    * lowpass's onset transient, through the note's envelope and the
-   * instrument's volume gain.
+   * instrument's volume gain. Its nodes are the ones prepare() built for the
+   * pitch if there are any left, else built now: everything that depends on
+   * when the note starts (the connection into the graph, the envelope, the
+   * frequency, start and stop) happens here either way.
    */
   _startVoiceNote(frequency, duration) {
-    const { wave, onset } = this._voiceFor(frequency);
+    const { onset } = this._voiceFor(frequency);
     const { currentTime } = this.context;
     const endTime = currentTime + duration / 1000;
-    const { envelopeGain, volumeGain } = this._noteGains(currentTime, endTime, duration);
+    const volumeGain = this._volumeGainFor(currentTime, endTime);
+    const { oscillator, transient, envelopeGain } =
+      this._takePrepared(frequency) || this._buildVoiceNote(frequency);
 
-    const oscillator = this.context.createOscillator();
-    oscillator.setPeriodicWave(wave);
+    envelopeGain.connect(volumeGain);
+    applyEnvelope(envelopeGain, currentTime, this.envelope, duration);
+
     oscillator.frequency.setValueAtTime(frequency, currentTime);
     oscillator.connect(envelopeGain);
     oscillator.start(currentTime);
@@ -263,14 +325,37 @@ class Random extends Instrument {
     // where the envelope has closed). Its duration is spelled out because
     // Chrome 152 replays a buffer this short when it ends mid render
     // quantum (found nulling this graph, 2026-10-17).
-    const transient = this.context.createBufferSource();
-    transient.buffer = onset;
     transient.connect(envelopeGain);
     transient.start(currentTime, 0, onset.duration);
 
     // Track it so pause/stop fade it and updateVolume reaches it. When it
     // ends only its envelope leaves the graph: the volume gain is shared.
     this.trackOscillator(oscillator, volumeGain, duration, undefined, envelopeGain);
+  }
+
+  /**
+   * A voice note's nodes, unstarted and unconnected: the oscillator on the
+   * pitch's wave, the source of its onset buffer, and its envelope gain.
+   * @param {number} frequency - Hz
+   * @returns {{oscillator: OscillatorNode, transient: AudioBufferSourceNode, envelopeGain: GainNode}}
+   */
+  _buildVoiceNote(frequency) {
+    const { wave, onset } = this._voiceFor(frequency);
+    const envelopeGain = this.context.createGain();
+    const oscillator = this.context.createOscillator();
+    oscillator.setPeriodicWave(wave);
+    const transient = this.context.createBufferSource();
+    transient.buffer = onset;
+    return { oscillator, transient, envelopeGain };
+  }
+
+  /** A note prepare() built for this frequency, taken for one note; or none. */
+  _takePrepared(frequency) {
+    const prepared = this._prepared.get(frequency);
+    if (!prepared) return undefined;
+    const note = prepared.shift();
+    if (prepared.length === 0) this._prepared.delete(frequency);
+    return note;
   }
 
   /**
@@ -319,11 +404,15 @@ class Random extends Instrument {
   /**
    * Fade every sounding note out on the shared volume gain (as each note's
    * own gain used to be faded), then retire that gain: the next note gets a
-   * fresh one at the current volume, as it always did.
+   * fresh one at the current volume, as it always did. What prepare() built
+   * that no note has used is let go (never started or connected, nothing
+   * else holds it).
    * @param {number} fadeTime - Fade out time in seconds (default 0.01)
    */
   stopAll(fadeTime = 0.01) {
     super.stopAll(fadeTime);
+    this._prepared.clear();
+    this._spareVolume = null;
     const retired = this._volume;
     if (!retired) return;
     this._volume = null;
@@ -339,8 +428,8 @@ class Random extends Instrument {
   /**
    * Retire the instrument, freeing what it built to play: every voice (each
    * wave is ~0.6 MB of the browser's wavetables; see MAX_VOICE_TABLE_SIZE),
-   * the lowpass probe, and the volume gain, which stop() retires once its
-   * fade is over.
+   * the lowpass probe, and what stop() frees: the notes prepared and unused,
+   * and the volume gain, retired once its fade is over.
    */
   dispose() {
     super.dispose();
@@ -430,14 +519,16 @@ class Random extends Instrument {
    * however many notes sound. Each note used to get a gain of its own,
    * starting at exactly the current volume: a note that finds no earlier
    * note still sounding sets the shared one to it the same way, and one that
-   * overlaps a sounding note joins the ramp that note is on.
+   * overlaps a sounding note joins the ramp that note is on. A fresh one is
+   * the gain prepare() built if there is one, set and connected only now.
    * @param {number} startTime - the note's onset (audio clock, seconds)
    * @param {number} endTime - its end
    * @returns {GainNode}
    */
   _volumeGainFor(startTime, endTime) {
     if (!this._volume) {
-      const node = this.context.createGain();
+      const node = this._spareVolume || this.context.createGain();
+      this._spareVolume = null;
       node.gain.value = this.volumeMultiplier;
       node.connect(this.context.destination);
       this._volume = { node, busyUntil: endTime };
