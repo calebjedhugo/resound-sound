@@ -15,6 +15,7 @@ function captureGraph() {
   const origFilter = context.createBiquadFilter.bind(context);
   jest.spyOn(context, 'createBiquadFilter').mockImplementation(() => {
     const node = origFilter();
+    jest.spyOn(node, 'connect');
     filters.push(node);
     return node;
   });
@@ -25,6 +26,7 @@ function captureGraph() {
   });
   jest.spyOn(context, 'createOscillator').mockImplementation(() => {
     const node = origOsc();
+    jest.spyOn(node, 'connect');
     jest.spyOn(node, 'start');
     jest.spyOn(node, 'stop');
     jest.spyOn(node, 'setPeriodicWave');
@@ -110,6 +112,7 @@ describe('Random instrument', () => {
 
   afterEach(() => {
     graph.context.currentTime = 0;
+    graph.context.sampleRate = SAMPLE_RATE;
     jest.restoreAllMocks();
   });
 
@@ -232,6 +235,70 @@ describe('Random instrument', () => {
 
     await playAndFinish(inst, [{ pitch: 'C/5', length: '1/4' }]);
     expect(graph.waves).toHaveLength(2);
+  });
+
+  it('plays one oscillator on a voice up to 88.2 kHz', async () => {
+    graph.context.sampleRate = 88200;
+    const inst = new Random('r1');
+    await playAndFinish(inst, A4);
+
+    expect(graph.oscillators).toHaveLength(1);
+    expect(graph.oscillators[0].setPeriodicWave).toHaveBeenCalledWith(graph.waves[0].wave);
+  });
+
+  describe('above 88.2 kHz, where a voice would hold 16384-sample wavetables', () => {
+    beforeEach(() => {
+      graph.context.sampleRate = 96000;
+    });
+
+    it('plays the graph a voice folds together: the built-in wave through the lowpass, plus a sine per harmonic', async () => {
+      randomSpy.mockReturnValue(0.5); // a triangle, cutoff 2750 Hz, harmonics 2x and 3x at 0.2
+      const inst = new Random('r1');
+      const playPromise = inst.play({ data: A4, tempo: 120, basis: 4 });
+      await Promise.resolve();
+
+      expect(graph.waves).toHaveLength(0);
+      expect(graph.sources).toHaveLength(0);
+      const [volumeGain, envelope, ...harmonicGains] = graph.gains;
+      expect(volumeGain.connect).toHaveBeenCalledWith(graph.context.destination);
+      expect(envelope.connect).toHaveBeenCalledWith(volumeGain);
+
+      const [fundamental, ...harmonics] = graph.oscillators;
+      const [lowpass] = graph.filters;
+      expect(fundamental.type).toBe('triangle');
+      expect(fundamental.frequency.setValueAtTime.mock.calls[0][0]).toBeCloseTo(440, 6);
+      expect(fundamental.connect).toHaveBeenCalledWith(lowpass);
+      expect(lowpass.type).toBe('lowpass');
+      expect(lowpass.frequency.setValueAtTime).toHaveBeenCalledWith(inst.filterCutoff, 0);
+      expect(lowpass.connect).toHaveBeenCalledWith(envelope);
+
+      expect(harmonics.map((osc) => osc.type)).toEqual(['sine', 'sine']);
+      harmonics.forEach((osc, i) => {
+        const { multiple, volume } = inst.harmonics[i];
+        expect(osc.frequency.setValueAtTime.mock.calls[0][0]).toBeCloseTo(440 * multiple, 6);
+        expect(osc.connect).toHaveBeenCalledWith(harmonicGains[i]);
+        expect(harmonicGains[i].gain.setValueAtTime).toHaveBeenCalledWith(volume, 0);
+        expect(harmonicGains[i].connect).toHaveBeenCalledWith(envelope);
+      });
+      graph.oscillators.forEach((osc) => {
+        expect(osc.stop.mock.calls[0][0] - osc.start.mock.calls[0][0]).toBeCloseTo(0.5, 5);
+      });
+
+      // One volume gain for all of it, which a volume change ramps once
+      inst.updateVolume(0.5);
+      expect(volumeGain.gain.setTargetAtTime).toHaveBeenCalledTimes(1);
+
+      await jest.advanceTimersByTimeAsync(QUARTER_AT_120);
+      await playPromise;
+    });
+
+    it('builds no voices, so warm() has nothing to do', async () => {
+      const inst = new Random('r1');
+      inst.warm(['A/4', 'C/5']);
+      await playAndFinish(inst, A4);
+
+      expect(graph.waves).toHaveLength(0);
+    });
   });
 
   it('routes every note through one volume gain that a volume change ramps once', async () => {

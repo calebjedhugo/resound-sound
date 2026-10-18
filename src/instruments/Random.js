@@ -72,6 +72,13 @@ function wavetableSize(sampleRate) {
   return 16384;
 }
 
+// The largest wavetable a voice is built on. A voice costs ~0.6 MB of
+// wavetable and ~1-1.5 ms to build at 44.1-48 kHz, but ~2.8 MB and ~4.3 ms
+// on the 16384-sample tables above 88.2 kHz (Chrome 152, 2026-10-17): there
+// a note builds the graph a voice folds together instead, which keeps no
+// per-pitch tables
+const MAX_VOICE_TABLE_SIZE = 4096;
+
 // The sample where each built-in wave's full-band table peaks: beside the
 // square's and the sawtooth's jumps (the Gibbs overshoot), on the crest of
 // the others. Checked by brute force at all three table sizes.
@@ -181,34 +188,57 @@ class Random extends Instrument {
   }
 
   /**
-   * Build these pitches' voices now (~1 ms each, mostly the browser's
-   * wavetable), so the first note of each costs no more than any other.
-   * Synchronous.
+   * Build these pitches' voices now (~1-1.5 ms each at 44.1-48 kHz, mostly
+   * the browser's wavetable), so the first note of each costs no more than
+   * any other. Synchronous. Above 88.2 kHz notes build no voices, so this
+   * builds nothing.
    * @param {Array<string|number>} pitches - e.g. ['C/4', 'E/4']
    */
   warm(pitches) {
-    if (this.disposed) return;
+    if (this.disposed || !this._playsVoices()) return;
     pitches.forEach((pitch) => this._voiceFor(getFrequency(pitch)));
   }
 
   /**
-   * Start a note: one oscillator playing this timbre's wavetable for the
-   * pitch, plus the lowpass's onset transient, through the note's envelope
-   * and the instrument's volume gain.
+   * Start a note: one oscillator on this timbre's voice for the pitch, or,
+   * above 88.2 kHz, the graph that voice folds together.
    * Note cleans itself up after duration
    */
   startNote(pitch, duration) {
     if (this.disposed) return; // nothing it freed is built again
     const frequency = getFrequency(pitch);
-    const { wave, onset } = this._voiceFor(frequency);
-    const { currentTime } = this.context;
-    const endTime = currentTime + duration / 1000;
-    const volumeGain = this._volumeGainFor(currentTime, endTime);
+    if (this._playsVoices()) this._startVoiceNote(frequency, duration);
+    else this._startGraphNote(frequency, duration);
+  }
 
-    // Envelope gain node (ADSR)
+  /** Whether notes play a voice (MAX_VOICE_TABLE_SIZE) at the context's rate. */
+  _playsVoices() {
+    return wavetableSize(this.context.sampleRate) <= MAX_VOICE_TABLE_SIZE;
+  }
+
+  /**
+   * A note's envelope (ADSR) gain, joined to the volume gain every note
+   * plays through.
+   * @returns {{envelopeGain: GainNode, volumeGain: GainNode}}
+   */
+  _noteGains(currentTime, endTime, duration) {
+    const volumeGain = this._volumeGainFor(currentTime, endTime);
     const envelopeGain = this.context.createGain();
     envelopeGain.connect(volumeGain);
     applyEnvelope(envelopeGain, currentTime, this.envelope, duration);
+    return { envelopeGain, volumeGain };
+  }
+
+  /**
+   * One oscillator playing this timbre's wavetable for the pitch, plus the
+   * lowpass's onset transient, through the note's envelope and the
+   * instrument's volume gain.
+   */
+  _startVoiceNote(frequency, duration) {
+    const { wave, onset } = this._voiceFor(frequency);
+    const { currentTime } = this.context;
+    const endTime = currentTime + duration / 1000;
+    const { envelopeGain, volumeGain } = this._noteGains(currentTime, endTime, duration);
 
     const oscillator = this.context.createOscillator();
     oscillator.setPeriodicWave(wave);
@@ -229,6 +259,49 @@ class Random extends Instrument {
     // Track it so pause/stop fade it and updateVolume reaches it. When it
     // ends only its envelope leaves the graph: the volume gain is shared.
     this.trackOscillator(oscillator, volumeGain, duration, undefined, envelopeGain);
+  }
+
+  /**
+   * The graph a voice folds together, built for one note: the built-in wave
+   * through the lowpass, plus a sine oscillator and gain per harmonic,
+   * through the note's envelope and the instrument's volume gain: the graph
+   * every voice is nulled against, so it sounds the same by construction.
+   */
+  _startGraphNote(frequency, duration) {
+    const { currentTime } = this.context;
+    const endTime = currentTime + duration / 1000;
+    const { envelopeGain, volumeGain } = this._noteGains(currentTime, endTime, duration);
+
+    const oscillator = this.context.createOscillator();
+    oscillator.type = this.waveform;
+    oscillator.frequency.setValueAtTime(frequency, currentTime);
+
+    const filter = this.context.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(this.filterCutoff, currentTime);
+    oscillator.connect(filter);
+    filter.connect(envelopeGain);
+
+    oscillator.start(currentTime);
+    oscillator.stop(endTime);
+    // Tracked as a voice's oscillator is. The note's oscillators all stop
+    // together, so the first to end frees the envelope for all of them
+    this.trackOscillator(oscillator, volumeGain, duration, undefined, envelopeGain);
+
+    this.harmonics.forEach(({ multiple, volume }) => {
+      const harmonic = this.context.createOscillator();
+      harmonic.type = 'sine'; // Harmonics always sine
+      harmonic.frequency.setValueAtTime(frequency * multiple, currentTime);
+
+      const harmonicGain = this.context.createGain();
+      harmonicGain.gain.setValueAtTime(volume, currentTime);
+      harmonic.connect(harmonicGain);
+      harmonicGain.connect(envelopeGain);
+
+      harmonic.start(currentTime);
+      harmonic.stop(endTime);
+      this.trackOscillator(harmonic, volumeGain, duration, undefined, envelopeGain);
+    });
   }
 
   /**
@@ -253,9 +326,9 @@ class Random extends Instrument {
 
   /**
    * Retire the instrument, freeing what it built to play: every voice (each
-   * wave is ~0.6 MB of the browser's wavetables at 44.1/48 kHz, ~2.8 MB at
-   * 96 kHz; measured in Chrome 152, 2026-10-17), the lowpass probe, and the
-   * volume gain, which stop() retires once its fade is over.
+   * wave is ~0.6 MB of the browser's wavetables; see MAX_VOICE_TABLE_SIZE),
+   * the lowpass probe, and the volume gain, which stop() retires once its
+   * fade is over.
    */
   dispose() {
     super.dispose();
