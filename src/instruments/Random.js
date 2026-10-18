@@ -187,6 +187,7 @@ class Random extends Instrument {
    * @param {Array<string|number>} pitches - e.g. ['C/4', 'E/4']
    */
   warm(pitches) {
+    if (this.disposed) return;
     pitches.forEach((pitch) => this._voiceFor(getFrequency(pitch)));
   }
 
@@ -197,6 +198,7 @@ class Random extends Instrument {
    * Note cleans itself up after duration
    */
   startNote(pitch, duration) {
+    if (this.disposed) return; // nothing it freed is built again
     const frequency = getFrequency(pitch);
     const { wave, onset } = this._voiceFor(frequency);
     const { currentTime } = this.context;
@@ -247,6 +249,18 @@ class Random extends Instrument {
         // Context may be torn down
       }
     }, fadeTime * 1000 + RETIRED_VOLUME_MARGIN_MS);
+  }
+
+  /**
+   * Retire the instrument, freeing what it built to play: every voice (each
+   * wave is ~0.6 MB of the browser's wavetables at 44.1/48 kHz, ~2.8 MB at
+   * 96 kHz; measured in Chrome 152, 2026-10-17), the lowpass probe, and the
+   * volume gain, which stop() retires once its fade is over.
+   */
+  dispose() {
+    super.dispose();
+    this._voices.clear();
+    this._lowpass = null;
   }
 
   /**

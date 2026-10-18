@@ -13,7 +13,7 @@ Publishing is **manual and local** — it needs `npm login` with publish rights 
     - **Default = lazy auto-cache:** first strike of a pitch renders live, then its buffer renders in the background (`OfflineAudioContext`, reusing `scheduleNote()`) into velocity layers (default 4) + loudness trim, so later strikes are cheap. Auto-disables where `OfflineAudioContext` is unavailable (e.g. jsdom test envs) → stays live, so consumers/tests don't break.
     - **`await piano.warm([pitches])`** pre-renders at load — REQUIRED for mobile/dense polyphony to avoid first-hit live spikes. Offline renders share one module-level phase bank per sample rate (building one is ~14 ms).
     - **`new Piano(id, { autoSample: false })`** = pure live (continuous velocity, max fidelity). Also `{ layers, maxCacheBytes (LRU byte budget, default 32MB), maxCacheEntries }`.
-  - `Random` — ONE oscillator per note playing a cached per-pitch `PeriodicWave` (the built-in wave with its lowpass folded in + the harmonics) plus a few-ms onset buffer (the biquad's start-up transient), through one volume gain shared by the instance's notes. **It must sound exactly like the old oscillator → biquad + harmonic-oscillators graph**: any change to it gets re-nulled against that graph in a real browser (residual ≤ -60 dB; see CHANGELOG). Chrome holds ~0.6 MB of wavetable per (instance, pitch); `warm(pitches)` builds voices ahead (~1 ms each).
+  - `Random` — ONE oscillator per note playing a cached per-pitch `PeriodicWave` (the built-in wave with its lowpass folded in + the harmonics) plus a few-ms onset buffer (the biquad's start-up transient), through one volume gain shared by the instance's notes. **It must sound exactly like the old oscillator → biquad + harmonic-oscillators graph**: any change to it gets re-nulled against that graph in a real browser (residual ≤ -60 dB; see CHANGELOG). Chrome holds ~0.6 MB of wavetable per (instance, pitch) at 44.1/48 kHz, ~2.8 MB at 96 kHz (measured 2026-10-17; freed by GC once unreachable); `warm(pitches)` builds voices ahead (~1-1.5 ms each, ~4 ms at 96 kHz). **`dispose()` an instance you are done with**: it drops its voices and plays nothing again.
 - `src/lib/` — `AudioContextManager` (singleton), `Envelope`, `MusicalClock`, `duration`, `noteFrequencies`.
   - `noteFrequencies.js` — a measured table for C/2–B/5; anything outside it is computed in equal temperament. Accepts `'C/4'` and `'C4'`. Only genuinely unparseable input falls back to A4 with a warning.
   - `instrumentRegistry.js` — `initInstruments()` / `getInstrument()` / `instrumentReady()`: eager page-load construction + warm of sampled instruments, registered by id (`SPEC-init.md`). `getInstrument` is synchronous and says nothing about warming; `instrumentReady(id)` is the awaitable one, for code that didn't start the init (a play button tapped mid-warm).
@@ -24,7 +24,7 @@ Publishing is **manual and local** — it needs `npm login` with publish rights 
 ## Workflows
 
 ```bash
-npm test            # Jest, 142 integration tests — keep these green, they are the safety net
+npm test            # Jest, 147 integration tests — keep these green, they are the safety net
 npm run build       # webpack ESM bundle + tsc declarations to dist/
 npm start           # webpack-watch + tsc-watch + editor on http://localhost:5174
 ```
@@ -57,7 +57,7 @@ Editor only knows the synth topology. Noise-based instruments (Clap-style) still
 - **IMPORTANT: `AudioContextManager` and the `instrumentRegistry` are module-level singletons.** Two copies of `resound-sound` in a consumer's `node_modules` tree gives two AudioContexts (timing weirdness) and two registries (`getInstrument` returns `undefined` for an id the other copy registered). After linking, verify with `npm ls resound-sound` in the consumer.
 - **IMPORTANT: Consumers using jest need `transformIgnorePatterns: ['/node_modules/(?!(resound-sound)/)']`** — the published bundle is ESM and babel-jest skips `node_modules` by default.
 - **Vite 4, not 5.** Vite 5 requires Node 18+; user is on Node 16. Matches resound-fe.
-- **`stop()` does not interrupt an in-flight `setTimeout` sleep either** — same mechanism as the pause quirk, so one more note straggles out. Unlike pause, the state it leaves behind IS a full stop: `playbackState.isStopping` tells the unwinding loop not to re-park the cleared state as a pause.
+- **`stop()` does not interrupt an in-flight `setTimeout` sleep either** — same mechanism as the pause quirk, so one more note straggles out (`dispose()` lets none out). Unlike pause, the state it leaves behind IS a full stop: `playbackState.isStopping` tells the unwinding loop not to re-park the cleared state as a pause.
 
 ## Consumer
 

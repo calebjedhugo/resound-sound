@@ -34,7 +34,7 @@ piano.play({
 
 | Export | What it is |
 |---|---|
-| `Instrument` | Base class. Subclass and implement `startNote(pitch, duration, velocity?)` to ship a custom timbre. |
+| `Instrument` | Base class. Subclass and implement `startNote(pitch, duration, velocity?)` to ship a custom timbre. `dispose()` retires an instance for good (stops it; nothing plays again; `Random` frees its wavetables). |
 | `Synth` | Generic subtractive synth. Configurable `waveform`, `filterType`, `filterCutoff`, `envelope`, `harmonics`, `detune`. |
 | `Piano`, `Fountain`, `Random`, `Clap` | Concrete instruments. |
 | `audioContextManager` | Module-level singleton. Lazily creates a unified `AudioContext`, unlocks audio on iOS/Safari. |

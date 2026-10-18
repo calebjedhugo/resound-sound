@@ -84,6 +84,51 @@ describe('Instrument', () => {
     });
   });
 
+  describe('dispose', () => {
+    it('lets no note out of a play loop asleep between notes, and reports none', async () => {
+      const inst = new Recorder();
+      const heard = [];
+      inst.noteCallback = (event) => heard.push(event.pitch);
+      const playPromise = inst.play({ data: THREE_NOTES, tempo: 120, basis: 4 });
+      await Promise.resolve();
+
+      inst.dispose();
+
+      // Where a stop() here lets D/4 straggle out (above), nothing does
+      await jest.advanceTimersByTimeAsync(QUARTER_AT_120 * 3);
+      await playPromise;
+      expect(inst.started.map(({ pitch }) => pitch)).toEqual(['C/4']);
+      expect(heard).toEqual(['C/4']);
+      expect(inst.playbackState.isPlaying).toBe(false);
+    });
+
+    it('fades what is sounding as a stop does', () => {
+      const inst = new Recorder();
+      const gainNode = inst.context.createGain();
+      const oscillator = { stop: jest.fn() };
+      inst.trackOscillator(oscillator, gainNode, 1000);
+
+      inst.dispose();
+
+      const end = inst.context.currentTime + 0.05; // stop()'s fade
+      expect(gainNode.gain.linearRampToValueAtTime).toHaveBeenCalledWith(0, end);
+      expect(oscillator.stop).toHaveBeenCalledWith(end);
+    });
+
+    it('plays nothing afterwards, chord or note', () => {
+      const inst = new Recorder();
+      const onNote = jest.fn();
+      inst.noteCallback = onNote;
+      inst.dispose();
+
+      inst.playNoteImmediate({ pitch: 'C/4', length: '1/4' }, 120, 4);
+      inst.playChordImmediate([{ pitch: 'E/4', length: '1/4' }], 120, 4);
+
+      expect(inst.started).toHaveLength(0);
+      expect(onNote).not.toHaveBeenCalled();
+    });
+  });
+
   describe('stopAll', () => {
     it('ramps tracked notes to silence rather than cutting them off', () => {
       const inst = new Recorder();

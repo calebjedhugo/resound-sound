@@ -11,6 +11,7 @@ All notable changes to this package follow [Keep a Changelog](https://keepachang
 - `Piano` offline renders (`warm()` and the lazy auto-cache) share one phase bank per sample rate instead of each building its own 16 PeriodicWaves (~14 ms of main thread per render in Chrome). Renders sound the same (within 1.8e-7, Chrome's own render-to-render variation).
 
 ### Added
+- `Instrument.dispose()` — retires an instrument for good: it stops (sounding notes fade as on `stop()`) and nothing plays or is reported again, so a play loop asleep between notes no longer lets one more note out as it does after `stop()`. `Random.dispose()` also drops every voice, its lowpass probe and (once the fade is over) its volume gain. A `Random` voice's wave holds Chrome's band-limited wavetables, measured in Chrome 152 at ~0.6 MB per (instance, pitch) at 44.1/48 kHz and ~2.8 MB at 96 kHz (1.5 / 4.3 ms to build); an unreachable wave is freed by GC, so this matters wherever a retired instance is still referenced.
 - `Random.warm(pitches)` — builds those pitches' voices (wave + onset buffer) synchronously, so their first notes cost no more than later ones.
 - `trackOscillator(oscillator, gainNode, duration, startTime, noteOutput)` — the optional `noteOutput` is the node `onended` (and `cancelScheduled()`) disconnects; it defaults to `gainNode`, so per-note-gain instruments are unchanged. `Random`, whose notes share a volume gain, passes each note's envelope.
 

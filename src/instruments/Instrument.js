@@ -67,6 +67,9 @@ class Instrument {
 
     // Source position for spatial audio and listening
     this.sourcePosition = null;
+
+    // Retired for good (dispose): its play paths sound and report nothing
+    this.disposed = false;
   }
 
   /**
@@ -205,7 +208,7 @@ class Instrument {
    * @param {number} basis - Beat note (4 = quarter note)
    */
   playNoteImmediate(note, tempo, basis) {
-    if (!isPitched(note)) return; // REST
+    if (!isPitched(note) || this.disposed) return; // REST, or retired
 
     const duration = getDuration(note.length, tempo, basis);
     emitNoteEvent(this, note);
@@ -222,6 +225,7 @@ class Instrument {
    * @param {number} basis - Beat note (4 = quarter note)
    */
   playChordImmediate(notes, tempo, basis) {
+    if (this.disposed) return;
     const durations = notes.map((note) => getDuration(note.length, tempo, basis));
 
     // Every event is emitted before any note starts, so a listener sees the
@@ -277,6 +281,18 @@ class Instrument {
 
     // Stop all oscillators with quick fade
     this.stopAll(0.05);
+  }
+
+  /**
+   * Retire the instrument for good: stop() (sounding notes fade as they do
+   * on any stop), and its play paths sound and report nothing more — a play
+   * loop asleep between notes wakes to nothing, where after stop() alone one
+   * more note straggles out. Subclasses also free what they built to play,
+   * and build none of it again.
+   */
+  dispose() {
+    this.disposed = true;
+    this.stop();
   }
 
   /**

@@ -7,10 +7,17 @@ function captureGraph() {
   const gains = [];
   const waves = [];
   const sources = [];
+  const filters = [];
   const origOsc = context.createOscillator.bind(context);
   const origGain = context.createGain.bind(context);
   const origWave = context.createPeriodicWave.bind(context);
   const origSource = context.createBufferSource.bind(context);
+  const origFilter = context.createBiquadFilter.bind(context);
+  jest.spyOn(context, 'createBiquadFilter').mockImplementation(() => {
+    const node = origFilter();
+    filters.push(node);
+    return node;
+  });
   jest.spyOn(context, 'createBufferSource').mockImplementation(() => {
     const node = origSource();
     sources.push(node);
@@ -36,7 +43,23 @@ function captureGraph() {
     waves.push({ wave, real: Array.from(real), imag: Array.from(imag), options });
     return wave;
   });
-  return { context, oscillators, gains, waves, sources };
+  return { context, oscillators, gains, waves, sources, filters };
+}
+
+// Every object reachable from a root through own properties, Map and Set
+// entries: what a garbage collector would keep alive for a live instance
+// (the AudioContext is shared, not the instance's)
+function reachableFrom(root, context) {
+  const seen = new Set();
+  const visit = (value) => {
+    if (value === null || typeof value !== 'object' || value === context || seen.has(value)) return;
+    seen.add(value);
+    if (value instanceof Map) value.forEach((entry, key) => [key, entry].forEach(visit));
+    if (value instanceof Set) value.forEach(visit);
+    if (!ArrayBuffer.isView(value)) Object.values(value).forEach(visit);
+  };
+  visit(root);
+  return seen;
 }
 
 const QUARTER_AT_120 = 500; // ms
@@ -322,5 +345,48 @@ describe('Random instrument', () => {
     expect(freshGain).not.toBe(volumeGain);
     expect(freshGain.gain.value).toBe(0.6);
     expect(freshGain.connect).toHaveBeenCalledWith(graph.context.destination);
+  });
+
+  it('lets go of its voices, lowpass probe and volume gain when disposed', async () => {
+    const inst = new Random('r1');
+    inst.warm(['A/4', 'C/5']);
+    const playPromise = inst.play({ data: A4, tempo: 120, basis: 4 });
+    await Promise.resolve();
+    const built = [
+      ...graph.waves.map(({ wave }) => wave),
+      ...graph.sources.map((source) => source.buffer), // the onsets
+      ...graph.filters, // the probe
+      graph.gains[0], // the volume gain
+    ];
+    expect(built).toHaveLength(2 + 1 + 1 + 1);
+    // (A broken walk would pass the check below: it does reach them now)
+    const reachable = reachableFrom(inst, graph.context);
+    built.forEach((node) => expect(reachable.has(node)).toBe(true));
+
+    inst.dispose();
+
+    const left = reachableFrom(inst, graph.context);
+    built.forEach((node) => expect(left.has(node)).toBe(false));
+    // The sounding note fades on the volume gain, which then leaves the graph
+    const [volumeGain] = graph.gains;
+    expect(volumeGain.gain.linearRampToValueAtTime).toHaveBeenCalledWith(0, 0.05);
+    await jest.advanceTimersByTimeAsync(QUARTER_AT_120);
+    await playPromise;
+    expect(volumeGain.disconnect).toHaveBeenCalled();
+  });
+
+  it('builds nothing again once disposed, whatever asks', async () => {
+    const inst = new Random('r1');
+    await playAndFinish(inst, A4);
+    inst.dispose();
+    const counts = () => [graph.waves, graph.sources, graph.oscillators, graph.gains, graph.filters]
+      .map((nodes) => nodes.length);
+    const before = counts();
+
+    inst.warm(['C/5']); // a prewarm job still queued for it
+    inst.startNote('C/5', 500); // a scheduler driving it directly
+    await playAndFinish(inst, A4);
+
+    expect(counts()).toEqual(before);
   });
 });
