@@ -714,6 +714,39 @@ describe('Piano playback', () => {
       expect(piano._warmQueue.length).toBe(0);
     });
 
+    it('is warm for a pitch once every layer is cached or under way', async () => {
+      const piano = new Piano('p', { layers: [0.3, 0.7] });
+      expect(piano.isWarm(['C/4'])).toBe(false);
+
+      const warming = piano.warm(['C/4']);
+      expect(piano.isWarm(['C/4'])).toBe(true); // both layers rendering
+      expect(piano.isWarm(['C/4', 'D/4'])).toBe(false);
+      await warming;
+      expect(piano.isWarm(['C/4'])).toBe(true); // cached
+
+      piano.startNote('E/4', 500, 0.7); // a strike queues its own layer only
+      expect(piano.isWarm(['E/4'])).toBe(false);
+    });
+
+    it('can render now only while the warm pool has a free slot', async () => {
+      const piano = new Piano('p', { layers: [0.7] });
+      const pending = [];
+      jest.spyOn(piano, 'renderBuffer')
+        .mockImplementation(() => new Promise((resolve) => { pending.push(resolve); }));
+      expect(piano.canRenderNow()).toBe(true);
+
+      // Five un-warmed strikes: four render, the fifth waits in the pool,
+      // and a warm() now would only queue behind it
+      const pitches = ['C/4', 'D/4', 'E/4', 'F/4', 'G/4'];
+      pitches.forEach((pitch) => piano.startNote(pitch, 500));
+      expect(piano.canRenderNow()).toBe(false);
+      expect(piano.isWarm(pitches)).toBe(true); // all under way
+
+      pending.splice(0).forEach((resolve) => resolve({ length: 10 }));
+      await jest.advanceTimersByTimeAsync(0);
+      expect(piano.canRenderNow()).toBe(true); // just G/4 rendering
+    });
+
     it('evicts least-recently-used buffers once the byte budget is exceeded', async () => {
       const ref = new Piano('ref-bytes');
       const bytes = (pitch) => Math.ceil(ref.bufferSeconds(getFrequency(pitch)) * 20050) * 4;

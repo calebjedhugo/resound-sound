@@ -200,6 +200,18 @@ class Random extends Instrument {
   }
 
   /**
+   * Whether warm(pitches) has nothing left to build: each pitch's voice is
+   * built already, or this instance builds none (disposed, or above
+   * 88.2 kHz).
+   * @param {Array<string|number>} pitches - e.g. ['C/4', 'E/4']
+   * @returns {boolean}
+   */
+  isWarm(pitches) {
+    if (this.disposed || !this._playsVoices()) return true;
+    return pitches.every((pitch) => this._voices.has(getFrequency(pitch)));
+  }
+
+  /**
    * Start a note: one oscillator on this timbre's voice for the pitch, or,
    * above 88.2 kHz, the graph that voice folds together.
    * Note cleans itself up after duration

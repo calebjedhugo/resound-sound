@@ -237,6 +237,18 @@ describe('Random instrument', () => {
     expect(graph.waves).toHaveLength(2);
   });
 
+  it('is warm for a pitch once its voice is built, by warm() or by a first note', async () => {
+    const inst = new Random('r1');
+    expect(inst.isWarm(['A/4'])).toBe(false);
+
+    inst.warm(['A/4']);
+    expect(inst.isWarm(['A/4'])).toBe(true);
+    expect(inst.isWarm(['A/4', 'C/5'])).toBe(false);
+
+    await playAndFinish(inst, [{ pitch: 'C/5', length: '1/4' }]);
+    expect(inst.isWarm(['A/4', 'C/5'])).toBe(true);
+  });
+
   it('plays one oscillator on a voice up to 88.2 kHz', async () => {
     graph.context.sampleRate = 88200;
     const inst = new Random('r1');
@@ -292,12 +304,13 @@ describe('Random instrument', () => {
       await playPromise;
     });
 
-    it('builds no voices, so warm() has nothing to do', async () => {
+    it('builds no voices, so warm() has nothing to do and every pitch is warm', async () => {
       const inst = new Random('r1');
       inst.warm(['A/4', 'C/5']);
       await playAndFinish(inst, A4);
 
       expect(graph.waves).toHaveLength(0);
+      expect(inst.isWarm(['A/4', 'C/5'])).toBe(true);
     });
   });
 
@@ -455,5 +468,6 @@ describe('Random instrument', () => {
     await playAndFinish(inst, A4);
 
     expect(counts()).toEqual(before);
+    expect(inst.isWarm(['C/5'])).toBe(true); // nothing left for a warm() to build
   });
 });

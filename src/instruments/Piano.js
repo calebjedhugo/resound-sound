@@ -623,6 +623,32 @@ class Piano extends Instrument {
     await Promise.all(jobs);
   }
 
+  /**
+   * Whether warm(pitches) would start nothing: every velocity layer of each
+   * pitch is cached, rendering, or waiting in the pool already.
+   * @param {string[]} pitches - e.g. ['C/4', 'E/4']
+   * @returns {boolean}
+   */
+  isWarm(pitches) {
+    return pitches.every((pitch) => {
+      const midi = this.midiFromFreq(getFrequency(pitch));
+      return this.velocityLayers.every((_, li) => {
+        const key = this.cacheKey(midi, li);
+        return this.sampleBuffers.has(key) || this.pendingRenders.has(key) || this._warmJobs.has(key);
+      });
+    });
+  }
+
+  /**
+   * Whether a render warm() asks for now starts at once (its graph built
+   * inside the call), rather than waiting for a slot in the pool and being
+   * built whenever one frees.
+   * @returns {boolean}
+   */
+  canRenderNow() {
+    return this._warmActive < this.warmConcurrency && this._warmQueue.length === 0;
+  }
+
   /** Start queued warm renders until the pool is full. */
   _pumpWarmQueue() {
     while (this._warmActive < this.warmConcurrency && this._warmQueue.length) {

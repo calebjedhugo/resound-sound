@@ -12,7 +12,8 @@ All notable changes to this package follow [Keep a Changelog](https://keepachang
 
 ### Added
 - `Instrument.dispose()` — retires an instrument for good: it stops (sounding notes fade as on `stop()`) and nothing plays or is reported again, so a play loop asleep between notes no longer lets one more note out as it does after `stop()`. `Random.dispose()` also drops every voice, its lowpass probe and (once the fade is over) its volume gain. A `Random` voice's wave holds Chrome's band-limited wavetables, measured in Chrome 152 at ~0.6 MB per (instance, pitch) at 44.1/48 kHz (~1-1.5 ms to build); an unreachable wave is freed by GC, so this matters wherever a retired instance is still referenced.
-- `Random.warm(pitches)` — builds those pitches' voices (wave + onset buffer) synchronously, so their first notes cost no more than later ones.
+- `Random.warm(pitches)` — builds those pitches' voices (wave + onset buffer) synchronously, so their first notes cost no more than later ones. `Random.isWarm(pitches)` says whether it has anything left to build (nothing once every pitch's voice is built, once disposed, or above 88.2 kHz).
+- `Piano.isWarm(pitches)` — whether `warm(pitches)` would start nothing (every layer cached, rendering or waiting in the pool); `Piano.canRenderNow()` — whether a render `warm()` asks for now starts at once (its graph built inside the call) rather than waiting for a pool slot. For callers that schedule warm-ups into idle time and need to know what one would cost.
 - `trackOscillator(oscillator, gainNode, duration, startTime, noteOutput)` — the optional `noteOutput` is the node `onended` (and `cancelScheduled()`) disconnects; it defaults to `gainNode`, so per-note-gain instruments are unchanged. `Random`, whose notes share a volume gain, passes each note's envelope.
 
 ### Fixed
