@@ -70,12 +70,21 @@ class Instrument {
 
     // Retired for good (dispose): its play paths sound and report nothing
     this.disposed = false;
+
+    // Counts play() calls: a play loop that wakes from a sleep to find a
+    // newer one started meanwhile (a play() after stop()) is superseded
+    this._run = 0;
   }
 
   /**
    * Play sequence of notes/chords
    * Supports pause/resume by tracking position
    * Supports optional offset property on notes for timing adjustments
+   *
+   * stop() and pause() don't interrupt a sleep, so a stopped loop can still
+   * be asleep on its next note when the next play() starts. Waking to find
+   * that newer play(), it returns without playing that note or touching
+   * playbackState, which belongs to the newer play() now.
    * @param {Object} params
    * @param {Array} params.data - Array of notes or chords (each can have optional offset in ms)
    * @param {number} params.tempo - BPM
@@ -84,6 +93,9 @@ class Instrument {
   async play({ data = [], tempo = 120, basis = 4 }) {
     // If already playing, ignore
     if (this.playbackState.isPlaying) return;
+
+    this._run += 1;
+    const run = this._run;
 
     const elements = Array.isArray(data) ? data : [];
 
@@ -141,6 +153,7 @@ class Instrument {
       const waitTime = playTime - elapsedTime;
       if (waitTime > 0) {
         await sleep(waitTime);
+        if (run !== this._run) return; // superseded while asleep
       }
 
       // Update elapsed time to scheduled play time
@@ -159,7 +172,10 @@ class Instrument {
     // Wait for the last note to finish before resetting state. An empty phrase
     // has nothing to wait for (and no last entry to read a duration from).
     const lastScheduled = playSchedule[playSchedule.length - 1];
-    if (lastScheduled) await sleep(lastScheduled.duration);
+    if (lastScheduled) {
+      await sleep(lastScheduled.duration);
+      if (run !== this._run) return; // superseded while asleep
+    }
 
     // Finished playing - reset state
     this.playbackState.isPlaying = false;
@@ -269,7 +285,9 @@ class Instrument {
   /**
    * Stop playback completely and reset.
    * `isStopping` tells a play loop still sleeping on a note that this interrupt
-   * is a stop, so it exits without parking the state as a pause.
+   * is a stop, so it exits without parking the state as a pause. (It still
+   * plays the note it slept on first, unless a play() starts before it wakes:
+   * see play().)
    */
   stop() {
     this.playbackState.shouldStop = true;

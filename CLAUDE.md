@@ -24,7 +24,7 @@ Publishing is **manual and local** — it needs `npm login` with publish rights 
 ## Workflows
 
 ```bash
-npm test            # Jest, 147 integration tests — keep these green, they are the safety net
+npm test            # Jest, 149 integration tests — keep these green, they are the safety net
 npm run build       # webpack ESM bundle + tsc declarations to dist/
 npm start           # webpack-watch + tsc-watch + editor on http://localhost:5174
 ```
@@ -54,10 +54,11 @@ Editor only knows the synth topology. Noise-based instruments (Clap-style) still
 
 - **NEVER rename `babel.config.cjs` or `webpack.config.cjs` to `.js`** — `package.json` sets `"type": "module"`, so config files must stay `.cjs`.
 - **NEVER "fix" the `Instrument.pause()` quirk.** It does not interrupt an in-flight `setTimeout` sleep, so the next scheduled note plays before the loop honors `shouldStop`. The Piano pause test pins `currentIndex=2` after pausing mid-note-0 of a 3-note phrase. Established behavior — locked in by the test.
+- **`stop()` does not interrupt an in-flight `setTimeout` sleep either** — same mechanism as the pause quirk, so one more note straggles out (`dispose()` lets none out). Unlike pause, the state it leaves behind IS a full stop: `playbackState.isStopping` tells the unwinding loop not to re-park the cleared state as a pause.
+- **Each `play()` takes a run token** (`_run`): a loop waking from a sleep to find a NEWER `play()` (one started after `stop()`, before that loop woke) returns without playing its note or touching `playbackState`. It only retires superseded loops — both quirks above stay exactly as pinned.
 - **IMPORTANT: `AudioContextManager` and the `instrumentRegistry` are module-level singletons.** Two copies of `resound-sound` in a consumer's `node_modules` tree gives two AudioContexts (timing weirdness) and two registries (`getInstrument` returns `undefined` for an id the other copy registered). After linking, verify with `npm ls resound-sound` in the consumer.
 - **IMPORTANT: Consumers using jest need `transformIgnorePatterns: ['/node_modules/(?!(resound-sound)/)']`** — the published bundle is ESM and babel-jest skips `node_modules` by default.
 - **Vite 4, not 5.** Vite 5 requires Node 18+; user is on Node 16. Matches resound-fe.
-- **`stop()` does not interrupt an in-flight `setTimeout` sleep either** — same mechanism as the pause quirk, so one more note straggles out (`dispose()` lets none out). Unlike pause, the state it leaves behind IS a full stop: `playbackState.isStopping` tells the unwinding loop not to re-park the cleared state as a pause.
 
 ## Consumer
 

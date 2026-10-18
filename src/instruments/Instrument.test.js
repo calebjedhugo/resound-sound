@@ -82,6 +82,53 @@ describe('Instrument', () => {
       expect(inst.playbackState.isPlaying).toBe(false);
       expect(inst.started).toHaveLength(2); // nothing replayed
     });
+
+    it('lets a phrase played before the stopped loop wakes play alone', async () => {
+      const inst = new Recorder();
+      const heard = [];
+      inst.noteCallback = (event) => heard.push(event.pitch);
+      const stopped = inst.play({ data: THREE_NOTES, tempo: 120, basis: 4 });
+      await Promise.resolve();
+      inst.stop();
+      await jest.advanceTimersByTimeAsync(100);
+
+      // The stopped loop sleeps until D/4 at 500; the new phrase runs 100-1100
+      const next = inst.play({
+        data: [{ pitch: 'F/4', length: '1/4' }, { pitch: 'G/4', length: '1/4' }],
+        tempo: 120,
+        basis: 4,
+      });
+      await jest.advanceTimersByTimeAsync(QUARTER_AT_120 * 2 - 50);
+      // Nothing of the stopped phrase sounded, and the state is still the new one's
+      expect(inst.started.map(({ pitch }) => pitch)).toEqual(['C/4', 'F/4', 'G/4']);
+      expect(heard).toEqual(['C/4', 'F/4', 'G/4']);
+      expect(inst.playbackState.isPlaying).toBe(true);
+      expect(inst.playbackState.currentData).toHaveLength(2);
+
+      await jest.advanceTimersByTimeAsync(QUARTER_AT_120);
+      await Promise.all([stopped, next]);
+      expect(inst.playbackState.isPlaying).toBe(false);
+    });
+
+    it('lets a phrase played during the stopped loop’s last note keep its state to its end', async () => {
+      const inst = new Recorder();
+      const stopped = inst.play({ data: [{ pitch: 'C/4', length: '1/1' }], tempo: 120, basis: 4 });
+      await Promise.resolve();
+      inst.stop();
+      await jest.advanceTimersByTimeAsync(100);
+
+      // The stopped loop waits out C/4 until 2000; the new phrase runs 100-2600
+      const fiveQuarters = ['D/4', 'E/4', 'F/4', 'G/4', 'A/4'].map((pitch) => ({ pitch, length: '1/4' }));
+      const next = inst.play({ data: fiveQuarters, tempo: 120, basis: 4 });
+      await jest.advanceTimersByTimeAsync(2000);
+      expect(inst.playbackState.isPlaying).toBe(true);
+      expect(inst.playbackState.currentData).toBe(fiveQuarters);
+
+      await jest.advanceTimersByTimeAsync(QUARTER_AT_120);
+      await Promise.all([stopped, next]);
+      expect(inst.started.map(({ pitch }) => pitch)).toEqual(['C/4', ...fiveQuarters.map((n) => n.pitch)]);
+      expect(inst.playbackState.isPlaying).toBe(false);
+    });
   });
 
   describe('dispose', () => {
