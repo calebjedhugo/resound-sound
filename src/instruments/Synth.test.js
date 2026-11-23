@@ -3,7 +3,7 @@ import Synth from './Synth';
 
 // Snapshot Web Audio graph creation against the singleton context.
 // Mirrors the helper in Piano.test.js — Synth shares the same runtime topology
-// (oscillators → filter → envelope gain → volume gain → destination), so the
+// (oscillators → filter → envelope gain → volume gain → master output), so the
 // same capture pattern applies.
 function captureGraph() {
   const context = audioContextManager.getContext();
@@ -77,11 +77,11 @@ describe('Synth playback', () => {
         expect.any(Number)
       );
 
-      // Gain routing: oscillator → filter → envelopeGain → volumeGain → destination.
+      // Gain routing: oscillator → filter → envelopeGain → volumeGain → master output.
       // Two gains in default config (no harmonics): volumeGain, envelopeGain.
       expect(graph.gains).toHaveLength(2);
       const [volumeGain, envelopeGain] = graph.gains;
-      expect(volumeGain.connect).toHaveBeenCalledWith(graph.context.destination);
+      expect(volumeGain.connect).toHaveBeenCalledWith(audioContextManager.getOutput());
       expect(envelopeGain.connect).toHaveBeenCalledWith(volumeGain);
       expect(graph.filters[0].connect).toHaveBeenCalledWith(envelopeGain);
       expect(osc.connect).toHaveBeenCalledWith(graph.filters[0]);

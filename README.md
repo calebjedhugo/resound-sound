@@ -34,10 +34,10 @@ piano.play({
 
 | Export | What it is |
 |---|---|
-| `Instrument` | Base class. Subclass and implement `startNote(pitch, duration, velocity?)` to ship a custom timbre. `dispose()` retires an instance for good (stops it; nothing plays again; `Random` frees its wavetables). |
+| `Instrument` | Base class. Subclass and implement `startNote(pitch, duration, velocity?)` to ship a custom timbre (connect its output to `audioContextManager.getOutput()`, never to `context.destination`, so mute reaches it). `dispose()` retires an instance for good (stops it; nothing plays again; `Random` frees its wavetables). |
 | `Synth` | Generic subtractive synth. Configurable `waveform`, `filterType`, `filterCutoff`, `envelope`, `harmonics`, `detune`. |
 | `Piano`, `Fountain`, `Random`, `Clap` | Concrete instruments. |
-| `audioContextManager` | Module-level singleton. Lazily creates a unified `AudioContext`, unlocks audio on iOS/Safari. |
+| `audioContextManager` | Module-level singleton. Lazily creates a unified `AudioContext`, unlocks audio on iOS/Safari. Owns the master output every live sound goes through: `getOutput()`, `setMuted(bool)`, `isMuted()` — see below. |
 | `initInstruments`, `getInstrument`, `instrumentReady` | Eager page-load init + registry for sampled instruments — see below. |
 | `Sequencer` | Multi-voice playback of the shared note schema, with live pause/seek/tempo/mute/loop — see below. |
 | `buildTimeline`, `noteBeats`, `elementBeats` | The schema→events pass the `Sequencer` runs, exposed for analysis. |
@@ -108,6 +108,29 @@ still plays, it just renders live, so the loader has to clear either way.
 Without it, a tap during warm-up has no choice but to build a second
 instrument and pay for the whole pre-render again.
 
+## Mute everything
+
+```js
+import { audioContextManager } from 'resound-sound';
+
+audioContextManager.setMuted(true);   // fades out in 20 ms (no click)
+audioContextManager.isMuted();        // true
+audioContextManager.setMuted(false);  // fades back in
+```
+
+Every instrument (and the metronome, and the iOS unlock blip) connects to one
+master `GainNode`, `audioContextManager.getOutput()`, which feeds the live
+context's `destination`; muting fades only that gain. The context keeps
+running, so `currentTime`, the `Sequencer`'s lookahead and anything scheduled
+on the audio clock carry on while muted: unmuting picks up mid-phrase, in
+time. Call it whenever you like: before any context exists it just takes
+effect when the output is made (a persisted setting can be applied at boot),
+and while the context is still waiting for a gesture the gain is set at once.
+Offline renders (`Piano`'s warm-up buffers) draw into their own
+`OfflineAudioContext` and are never muted. A custom instrument connects to
+`getOutput()` too. (Not to be confused with the `Sequencer`'s per-voice
+`toggleMute()`.)
+
 ## Play a whole score (`Sequencer`)
 
 `Instrument.play()` plays one voice, start to finish, with no live control.
@@ -164,7 +187,7 @@ The playground opens at `http://localhost:5174/`. Tune the `Synth` envelope, wav
 ## Develop
 
 ```bash
-npm test           # Jest, 111 integration tests
+npm test           # Jest, 188 integration tests
 npm run build      # Webpack ESM bundle + tsc declarations to dist/
 npm start          # Webpack watch + tsc watch + editor dev server
 ```

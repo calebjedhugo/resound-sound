@@ -1,5 +1,6 @@
 import { getFrequency } from '../lib/noteFrequencies';
 import { applyEnvelope } from '../lib/Envelope';
+import audioContextManager from '../lib/AudioContextManager';
 import Instrument from './Instrument';
 
 /**
@@ -29,7 +30,7 @@ class Synth extends Instrument {
 
     const volumeGain = this.context.createGain();
     volumeGain.gain.value = this.volumeMultiplier;
-    volumeGain.connect(this.context.destination);
+    volumeGain.connect(audioContextManager.getOutput());
 
     const envelopeGain = this.context.createGain();
     envelopeGain.connect(volumeGain);

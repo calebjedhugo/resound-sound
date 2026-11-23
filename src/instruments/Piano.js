@@ -1,4 +1,5 @@
 import { getFrequency } from '../lib/noteFrequencies';
+import audioContextManager from '../lib/AudioContextManager';
 import Instrument from './Instrument';
 
 /**
@@ -160,7 +161,7 @@ class Piano extends Instrument {
     }
     this.limiter.curve = curve;
     this.limiter.oversample = '2x';
-    this.limiter.connect(ctx.destination);
+    this.limiter.connect(audioContextManager.getOutput());
 
     this.noiseBuffer = this.makeNoiseBuffer(ctx);
     this.phaseBank = this.makePhaseBank(ctx);

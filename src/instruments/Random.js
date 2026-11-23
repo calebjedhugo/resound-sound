@@ -1,5 +1,6 @@
 import { getFrequency } from '../lib/noteFrequencies';
 import { applyEnvelope } from '../lib/Envelope';
+import audioContextManager from '../lib/AudioContextManager';
 import Instrument from './Instrument';
 
 /**
@@ -530,7 +531,7 @@ class Random extends Instrument {
       const node = this._spareVolume || this.context.createGain();
       this._spareVolume = null;
       node.gain.value = this.volumeMultiplier;
-      node.connect(this.context.destination);
+      node.connect(audioContextManager.getOutput());
       this._volume = { node, busyUntil: endTime };
       return node;
     }

@@ -49,11 +49,12 @@ function captureGraph() {
 }
 
 // What a graph sounds like to the browser: the tree of nodes feeding the
-// destination (each node's inputs in the order they were connected), with
+// master output, which every live sound reaches the destination through
+// (each node's inputs in the order they were connected), with
 // every call made on each node and on its AudioParams: the times and values
 // of every automation event, and every start and stop. Waves and buffers by
 // content, so two instances with one timbre compare equal.
-function soundingGraph({ context, oscillators, gains, sources, filters, waves }) {
+function soundingGraph({ oscillators, gains, sources, filters, waves }) {
   const nodes = [...oscillators, ...gains, ...sources, ...filters];
   const edges = nodes.flatMap((node) =>
     node.connect.mock.calls.map(([to], i) => ({
@@ -94,9 +95,9 @@ function soundingGraph({ context, oscillators, gains, sources, filters, waves })
     if (filters.includes(node)) {
       return { type: node.type, frequency: events(node.frequency), inputs };
     }
-    return { inputs }; // the destination
+    return { inputs }; // the master output
   };
-  return describe(context.destination);
+  return describe(audioContextManager.getOutput());
 }
 
 // Every object reachable from a root through own properties, Map and Set
@@ -323,7 +324,7 @@ describe('Random instrument', () => {
       expect(graph.waves).toHaveLength(0);
       expect(graph.sources).toHaveLength(0);
       const [volumeGain, envelope, ...harmonicGains] = graph.gains;
-      expect(volumeGain.connect).toHaveBeenCalledWith(graph.context.destination);
+      expect(volumeGain.connect).toHaveBeenCalledWith(audioContextManager.getOutput());
       expect(envelope.connect).toHaveBeenCalledWith(volumeGain);
 
       const [fundamental, ...harmonics] = graph.oscillators;
@@ -377,7 +378,7 @@ describe('Random instrument', () => {
     // One volume gain, then one envelope per note
     expect(graph.gains).toHaveLength(4);
     const [volumeGain, ...envelopes] = graph.gains;
-    expect(volumeGain.connect).toHaveBeenCalledWith(graph.context.destination);
+    expect(volumeGain.connect).toHaveBeenCalledWith(audioContextManager.getOutput());
     envelopes.forEach((envelope) => expect(envelope.connect).toHaveBeenCalledWith(volumeGain));
 
     inst.updateVolume(0.5);
@@ -475,7 +476,7 @@ describe('Random instrument', () => {
     const freshGain = graph.gains[2];
     expect(freshGain).not.toBe(volumeGain);
     expect(freshGain.gain.value).toBe(0.6);
-    expect(freshGain.connect).toHaveBeenCalledWith(graph.context.destination);
+    expect(freshGain.connect).toHaveBeenCalledWith(audioContextManager.getOutput());
   });
 
   it('lets go of its voices, lowpass probe and volume gain when disposed', async () => {

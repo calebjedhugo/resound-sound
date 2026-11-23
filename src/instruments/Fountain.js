@@ -1,5 +1,6 @@
 import { getFrequency } from '../lib/noteFrequencies';
 import { applyEnvelope } from '../lib/Envelope';
+import audioContextManager from '../lib/AudioContextManager';
 import Instrument from './Instrument';
 
 /**
@@ -40,7 +41,7 @@ class Fountain extends Instrument {
     // Volume control (distance-based)
     const volumeGain = this.context.createGain();
     volumeGain.gain.value = this.volumeMultiplier;
-    volumeGain.connect(this.context.destination);
+    volumeGain.connect(audioContextManager.getOutput());
 
     // Envelope gain node (ADSR)
     const envelopeGain = this.context.createGain();

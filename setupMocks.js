@@ -1,10 +1,43 @@
 /**
  * Browser API mocks for jest.
  * Lifted from resound-fe/src/__tests__/helpers/mocks.js, audio-only subset.
+ *
+ * Nodes remember their connections (`outputs`; a node or destination that
+ * is connected to lists its `inputs`), so a test can follow where a sound
+ * goes: e.g. what reaches `context.destination`.
  */
 
-class MockGainNode {
+function connectNode(from, to) {
+  from.outputs.push(to);
+  if (to && to.inputs) to.inputs.push(from);
+  return to;
+}
+
+function disconnectNode(from) {
+  from.outputs.forEach((to) => {
+    if (to && to.inputs) to.inputs = to.inputs.filter((node) => node !== from);
+  });
+  from.outputs = [];
+}
+
+class MockNode {
   constructor() {
+    this.inputs = [];
+    this.outputs = [];
+  }
+
+  connect(to) {
+    return connectNode(this, to);
+  }
+
+  disconnect() {
+    disconnectNode(this);
+  }
+}
+
+class MockGainNode extends MockNode {
+  constructor() {
+    super();
     this.gain = {
       value: 1,
       setValueAtTime: jest.fn(),
@@ -18,15 +51,11 @@ class MockGainNode {
     };
   }
 
-  connect() {
-    return this;
-  }
-
-  disconnect() {}
 }
 
-class MockOscillatorNode {
+class MockOscillatorNode extends MockNode {
   constructor() {
+    super();
     this.frequency = {
       value: 440,
       setValueAtTime: jest.fn(),
@@ -43,11 +72,6 @@ class MockOscillatorNode {
     this.onended = null;
   }
 
-  connect() {
-    return this;
-  }
-
-  disconnect() {}
   start() {}
   stop() {
     if (this.onended) {
@@ -60,8 +84,9 @@ class MockOscillatorNode {
   }
 }
 
-class MockBiquadFilterNode {
+class MockBiquadFilterNode extends MockNode {
   constructor(sampleRate = 44100) {
+    super();
     this.sampleRate = sampleRate;
     this.type = 'lowpass';
     this.frequency = {
@@ -80,11 +105,6 @@ class MockBiquadFilterNode {
     };
   }
 
-  connect() {
-    return this;
-  }
-
-  disconnect() {}
 
   // The spec's lowpass biquad (Q in dB) at the current frequency/Q values,
   // for code that folds the filter into a periodic wave. Lowpass only.
@@ -110,23 +130,19 @@ class MockBiquadFilterNode {
   }
 }
 
-class MockWaveShaperNode {
+class MockWaveShaperNode extends MockNode {
   constructor() {
+    super();
     this.curve = null;
     this.oversample = 'none';
   }
 
-  connect() {
-    return this;
-  }
-
-  disconnect() {}
 }
 
 class MockAudioContext {
   constructor() {
     this.currentTime = 0;
-    this.destination = {};
+    this.destination = new MockNode();
     this.state = 'running';
     this.sampleRate = 44100;
   }
@@ -163,13 +179,17 @@ class MockAudioContext {
   }
 
   createBufferSource() {
-    return {
+    const source = {
       buffer: null,
-      connect: jest.fn(() => ({ connect: jest.fn() })),
+      inputs: [],
+      outputs: [],
+      connect: jest.fn((to) => connectNode(source, to)),
+      disconnect: jest.fn(() => disconnectNode(source)),
       start: jest.fn(),
       stop: jest.fn(),
       onended: null,
     };
+    return source;
   }
 
   resume() {

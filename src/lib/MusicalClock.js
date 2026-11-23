@@ -132,7 +132,7 @@ class MusicalClock {
     const gainNode = this.context.createGain();
 
     oscillator.connect(gainNode);
-    gainNode.connect(this.context.destination);
+    gainNode.connect(audioContextManager.getOutput());
 
     // High-pitched short click
     oscillator.frequency.value = 1000; // 1kHz
