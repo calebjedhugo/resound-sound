@@ -52,7 +52,7 @@ seq.play();                // or seq.play(song) = load + play
 
 A voice's `notes` is the notation element array:
 
-- note — `{ pitch: 'C4', length: '1/4', dotted?: true, tie?: 'start'|'continue'|'stop' }`
+- note — `{ pitch: 'C4', length: '1/4', dotted?: true|1|2, tie?: 'start'|'continue'|'stop' }` (`dotted: 2` = a double dot)
 - rest — same without `pitch`
 - chord — a nested array of notes
 - unknown keys (`lyric`, `clef`, `articulation`, …) are ignored, not rejected
@@ -65,7 +65,10 @@ those markers contribute 0 beats, matching resound-notation's `elementBeats`.
 
 - Position is measured in **notated quarter-note beats** — identical to
   resound-notation's `data-beat`. `beatsOf(note) = (num/den) * basis *
-  (dotted ? 1.5 : 1)`, so with the default `basis: 4` a `'1/4'` is 1.0.
+  dots(note)`, so with the default `basis: 4` a `'1/4'` is 1.0. `dots(note)`
+  is 1.5 for one dot (`dotted: true` or `1`, or any other truthy value),
+  1.75 for a double dot (`dotted: 2`; an integer n > 1 is n dots,
+  `2 - 2^-n`), 1 for none. A dotted chord member is dotted on its own.
 - Every voice starts at beat 0 and advances by its own elements. Voices are
   independent streams over one shared clock; nothing is padded or aligned.
 - A chord advances the voice by its FIRST length-bearing member — the rule
@@ -81,7 +84,16 @@ same pitch in the same voice produces ONE sounding event whose duration is the
 sum of the run's beats. `continue`/`stop` produce no attack but still consume
 their time. A `stop`/`continue` whose pitch differs from the open note, or with
 no open note, is malformed and sounds as an ordinary note (never silently
-merged). Ties on rests are ignored. Ties are matched per pitch inside chords.
+merged). Ties on rests are ignored. Ties are matched per pitch inside chords:
+each member of a chord (a nested array of notes) carries its own `tie`, so a
+tied member is held while its neighbours re-attack. A run's notes may be
+dotted or double-dotted; their beats are summed.
+
+`soundingBeats(elements, basis)` is the same merge seen per element (a tie
+start's whole run, 0 for a continuation, null for a rest), for a player that
+walks one voice element by element instead of running the `Sequencer`:
+`Theremin.play()` uses it, so the `Instrument.play()` path holds ties too
+on that instrument.
 
 ### Real-time clock
 

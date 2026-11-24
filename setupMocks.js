@@ -20,6 +20,21 @@ function disconnectNode(from) {
   from.outputs = [];
 }
 
+/**
+ * A mock AudioParam: every scheduling method, recorded.
+ */
+function mockParam(value) {
+  return {
+    value,
+    setValueAtTime: jest.fn(),
+    linearRampToValueAtTime: jest.fn(),
+    exponentialRampToValueAtTime: jest.fn(),
+    cancelScheduledValues: jest.fn(),
+    cancelAndHoldAtTime: jest.fn(),
+    setTargetAtTime: jest.fn(),
+  };
+}
+
 class MockNode {
   constructor() {
     this.inputs = [];
@@ -56,18 +71,8 @@ class MockGainNode extends MockNode {
 class MockOscillatorNode extends MockNode {
   constructor() {
     super();
-    this.frequency = {
-      value: 440,
-      setValueAtTime: jest.fn(),
-      linearRampToValueAtTime: jest.fn(),
-      exponentialRampToValueAtTime: jest.fn(),
-    };
-    this.detune = {
-      value: 0,
-      setValueAtTime: jest.fn(),
-      linearRampToValueAtTime: jest.fn(),
-      exponentialRampToValueAtTime: jest.fn(),
-    };
+    this.frequency = mockParam(440);
+    this.detune = mockParam(0);
     this.type = 'sine';
     this.onended = null;
   }
@@ -89,16 +94,8 @@ class MockBiquadFilterNode extends MockNode {
     super();
     this.sampleRate = sampleRate;
     this.type = 'lowpass';
-    this.frequency = {
-      value: 350,
-      setValueAtTime: jest.fn(),
-      linearRampToValueAtTime: jest.fn(),
-      exponentialRampToValueAtTime: jest.fn(),
-    };
-    this.Q = {
-      value: 1,
-      setValueAtTime: jest.fn(),
-    };
+    this.frequency = mockParam(350);
+    this.Q = mockParam(1);
     this.gain = {
       value: 0,
       setValueAtTime: jest.fn(),
@@ -139,6 +136,18 @@ class MockWaveShaperNode extends MockNode {
 
 }
 
+class MockDynamicsCompressorNode extends MockNode {
+  constructor() {
+    super();
+    this.threshold = { value: -24 };
+    this.knee = { value: 30 };
+    this.ratio = { value: 12 };
+    this.attack = { value: 0.003 };
+    this.release = { value: 0.25 };
+    this.reduction = 0;
+  }
+}
+
 class MockAudioContext {
   constructor() {
     this.currentTime = 0;
@@ -161,6 +170,10 @@ class MockAudioContext {
 
   createGain() {
     return new MockGainNode();
+  }
+
+  createDynamicsCompressor() {
+    return new MockDynamicsCompressorNode();
   }
 
   createBiquadFilter() {

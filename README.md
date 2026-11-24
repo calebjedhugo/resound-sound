@@ -37,10 +37,11 @@ piano.play({
 | `Instrument` | Base class. Subclass and implement `startNote(pitch, duration, velocity?)` to ship a custom timbre (connect its output to `audioContextManager.getOutput()`, never to `context.destination`, so mute reaches it). `dispose()` retires an instance for good (stops it; nothing plays again; `Random` frees its wavetables). |
 | `Synth` | Generic subtractive synth. Configurable `waveform`, `filterType`, `filterCutoff`, `envelope`, `harmonics`, `detune`. |
 | `Piano`, `Fountain`, `Random`, `Clap` | Concrete instruments. |
+| `Theremin` | A high-quality theremin with electric crackle (Resound's creature voice): gliding legato lines, delayed vibrato, sparse band-passed sparks. Plays dots and ties as written. See below. |
 | `audioContextManager` | Module-level singleton. Lazily creates a unified `AudioContext`, unlocks audio on iOS/Safari. Owns the master output every live sound goes through: `getOutput()`, `setMuted(bool)`, `isMuted()` — see below. |
 | `initInstruments`, `getInstrument`, `instrumentReady` | Eager page-load init + registry for sampled instruments — see below. |
 | `Sequencer` | Multi-voice playback of the shared note schema, with live pause/seek/tempo/mute/loop — see below. |
-| `buildTimeline`, `noteBeats`, `elementBeats` | The schema→events pass the `Sequencer` runs, exposed for analysis. |
+| `buildTimeline`, `noteBeats`, `elementBeats`, `soundingBeats` | The schema→events pass the `Sequencer` runs, exposed for analysis; `soundingBeats` is its per-element view (how long each note sounds, ties merged) for players that walk a phrase one element at a time. |
 | `MusicalClock` | Beat/ms conversions, optional metronome. |
 | `applyEnvelope`, `getFrequency`, `getDuration` | Building-block helpers. |
 
@@ -108,6 +109,48 @@ still plays, it just renders live, so the loader has to clear either way.
 Without it, a tap during warm-up has no choice but to build a second
 instrument and pay for the whole pre-render again.
 
+## A theremin (`Theremin`)
+
+```js
+import { Theremin } from 'resound-sound';
+
+const voice = new Theremin('lead');                     // the default voice
+const dry = new Theremin('dry', { crackle: false });    // no sparks at all
+const own = new Theremin('own', { warmth: 1.2, vibratoRate: 5.2, vibratoDepth: 9,
+  attack: 0.022, glide: 0.008, spark: 0.8 });
+
+voice.play({ data: song, tempo: 96, basis: 4 });       // notes, rests, chords
+```
+
+Each part of a song plays on one continuous oscillator, so notes join the way
+a theremin's do: a legato note glides to its pitch (time constant `glide`,
+~9 ms) with a short dip that re-articulates it (deeper on a repeated pitch), a
+note after silence scoops up 20 cents, and vibrato swells in after 160 ms. A
+chord takes a line per member. Crackle is sparse band-passed noise: a crack on
+each attack and ~3.5 a second while a note holds (`spark` scales the rate; 0
+or `crackle: false` for none).
+
+| option | default | |
+|---|---|---|
+| `warmth` | 1 | the 2nd-7th harmonics and the faint buzz, x (0-2; on a 0.05 grid so instances share wavetables) |
+| `vibratoRate` | 5.5 | Hz (0-12), jittered ±4% per note |
+| `vibratoDepth` | 11 | cents (0-50), jittered ±15% per note |
+| `attack` | 0.026 | seconds from silence to the peak (0.004-0.5) |
+| `glide` | 0.009 | portamento time constant, seconds (0.001-0.1) |
+| `spark` | 1 | crackle rate, x (0-4) |
+| `crackle` | true | false builds no crackle nodes at all |
+| `context`, `output` | live, master | e.g. an `OfflineAudioContext` and its `destination` |
+| `random`, `crackleRandom` | `Math.random` | seedable jitter and crackle |
+
+`getVoice()` / `setVoice(partial)` read and change the six voice values
+(`Theremin.DEFAULT_VOICE`, `Theremin.VOICE_LIMITS`). `play()` reads dots
+(`dotted: true` x1.5, `dotted: 2` a double dot x1.75) and holds tied notes as
+one sound, each chord member on its own; its note events carry `durationBeats`
+(how long the note sounds) and `dotted` / `tie`, and a tie start's
+`tiedDuration` (ms). `warm()` builds the wavetable ahead and `prepare(song,
+tempo)` the lines a song will start (unstarted, unconnected), so the moment a
+note starts only schedules; `dispose()` an instance you are done with.
+
 ## Mute everything
 
 ```js
@@ -130,6 +173,14 @@ Offline renders (`Piano`'s warm-up buffers) draw into their own
 `OfflineAudioContext` and are never muted. A custom instrument connects to
 `getOutput()` too. (Not to be confused with the `Sequencer`'s per-voice
 `toggleMute()`.)
+
+The master output then goes through a **limiter** before the speakers: a
+`DynamicsCompressor` at -3 dBFS, hard knee, ratio 20, 2 ms attack, 150 ms
+release, with Web Audio's automatic makeup gain taken back off. Below the
+threshold it changes nothing (a single theremin voice renders through it to a
+-96 dB residual, delayed by the compressor's fixed 6 ms look-ahead); several
+voices summing past full scale are held under it instead of clipping (three
+theremin voices in a triad: peak 1.73 -> 0.84).
 
 ## Play a whole score (`Sequencer`)
 

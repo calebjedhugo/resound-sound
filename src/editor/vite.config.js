@@ -8,7 +8,7 @@ const PACKAGE_SRC = resolve(__dirname, '../../src');
 const INSTRUMENTS_DIR = resolve(PACKAGE_SRC, 'instruments');
 const INDEX_FILE = resolve(PACKAGE_SRC, 'index.js');
 
-const RESERVED = new Set(['Instrument', 'Synth', 'Piano', 'Fountain', 'Random', 'Clap']);
+const RESERVED = new Set(['Instrument', 'Synth', 'Piano', 'Fountain', 'Random', 'Clap', 'Theremin']);
 
 const buildInstrumentSource = ({ name, envelope, harmonics, detune, waveform, filterType, filterCutoff }) =>
   `import Synth from './Synth';

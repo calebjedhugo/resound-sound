@@ -34,8 +34,19 @@ function settledGain(param) {
   return events[events.length - 1].value;
 }
 
-/** Everything connected straight into the live context's speakers. */
-const intoSpeakers = () => manager.getContext().destination.inputs;
+/**
+ * Everything that reaches the live context's speakers: what feeds the
+ * master limiter (which alone feeds the destination), or the destination
+ * itself where there is no limiter.
+ */
+const intoSpeakers = () => {
+  const { destination } = manager.getContext();
+  const { limiter } = manager;
+  if (limiter && destination.inputs.length === 1 && destination.inputs[0] === limiter.output) {
+    return limiter.input.inputs;
+  }
+  return destination.inputs;
+};
 
 /** Whether anything at all can be heard: what reaches the speakers, at its level. */
 const audible = () => intoSpeakers().some((node) => !node.gain || settledGain(node.gain) > 0);
@@ -50,6 +61,8 @@ const SOUNDS = [
   }],
   ['a Fountain note', () => new lib.Fountain().startNote('C/4', 200)],
   ['a Random note', () => new lib.Random('r').startNote('C/4', 200)],
+  ['a Theremin note', () => new lib.Theremin('t').startNote('C/4', 200)],
+  ['a Theremin note without crackle', () => new lib.Theremin('t', { crackle: false }).startNote('C/4', 200)],
   ['a Random note above 88.2 kHz (the old graph)', () => {
     manager.getContext().sampleRate = 96000;
     new lib.Random('r').startNote('C/4', 200);
@@ -81,10 +94,59 @@ describe('every live sound goes through the master output', () => {
 
   it('the iOS unlock blip goes through the master too', () => {
     const context = manager.getContext();
-    const blip = context.destination.inputs[0].inputs[0];
+    const blip = intoSpeakers()[0].inputs[0];
 
-    expect(context.destination.inputs).toEqual([manager.getOutput()]);
+    expect(context.destination.inputs).toEqual([manager.limiter.output]);
+    expect(intoSpeakers()).toEqual([manager.getOutput()]);
     expect(blip.buffer).toBeTruthy();
+  });
+});
+
+describe('the master limiter', () => {
+  it('sits between the master output and the speakers, set up as a limiter', () => {
+    const output = manager.getOutput();
+    const { destination } = manager.getContext();
+    const { input: compressor, output: trim } = manager.limiter;
+
+    expect(output.outputs).toEqual([compressor]);
+    expect(compressor.outputs).toEqual([trim]);
+    expect(destination.inputs).toEqual([trim]);
+    // A hard knee a little under full scale, as hard and fast as it goes
+    expect(compressor.threshold.value).toBeLessThan(0);
+    expect(compressor.threshold.value).toBeGreaterThanOrEqual(-6);
+    expect(compressor.knee.value).toBe(0);
+    expect(compressor.ratio.value).toBe(20);
+    expect(compressor.attack.value).toBeLessThanOrEqual(0.005);
+    expect(compressor.release.value).toBeLessThanOrEqual(0.25);
+  });
+
+  it("takes the compressor's own makeup gain back off: below the threshold it is unity", () => {
+    manager.getOutput();
+    const { input: compressor, output: trim } = manager.limiter;
+    const threshold = compressor.threshold.value;
+    const ratio = compressor.ratio.value;
+    // Web Audio's makeup gain: (1 / the curve at full scale) ^ 0.6
+    const makeup = (1 / 10 ** ((threshold - threshold / ratio) / 20)) ** 0.6;
+
+    expect(trim.gain.value * makeup).toBeCloseTo(1, 12);
+  });
+
+  it('is left out where the context cannot make one: the master goes straight out', () => {
+    const create = global.AudioContext.prototype.createDynamicsCompressor;
+    delete global.AudioContext.prototype.createDynamicsCompressor;
+    try {
+      const output = manager.getOutput();
+      expect(manager.limiter).toBeNull();
+      expect(manager.getContext().destination.inputs).toEqual([output]);
+    } finally {
+      global.AudioContext.prototype.createDynamicsCompressor = create;
+    }
+  });
+
+  it('mute still silences everything', () => {
+    manager.setMuted(true);
+    new lib.Theremin('t').startNote('C/4', 200);
+    expect(audible()).toBe(false);
   });
 });
 

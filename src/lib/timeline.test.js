@@ -1,4 +1,6 @@
-import { buildTimeline } from './timeline';
+import {
+  buildTimeline, noteBeats, elementBeats, soundingBeats,
+} from './timeline';
 
 // Schema-native playback (SPEC-schema-playback.md): the timeline pass turns the
 // shared note schema — the very arrays resound-notation renders — into sounding
@@ -30,6 +32,35 @@ describe('buildTimeline', () => {
     expect(events[0].durationBeats).toBe(1.5);
     expect(events[1].beat).toBe(1.5);
     expect(totalBeats).toBe(2);
+  });
+
+  it('gives double-dotted notes (dotted: 2) 1.75x, and reads dotted: 1 as one dot', () => {
+    const { events, totalBeats } = buildTimeline(voice([
+      { pitch: 'C4', length: '1/4', dotted: 2 },
+      { pitch: 'D4', length: '1/16' },
+      { pitch: 'E4', length: '1/2', dotted: 1 },
+      [{ pitch: 'F4', length: '1/8', dotted: 2 }, { pitch: 'A4', length: '1/8', dotted: 2 }],
+      { length: '1/4', dotted: 2 },
+      { pitch: 'G4', length: '1/4', dotted: false },
+    ]));
+
+    expect(events.map((e) => [e.pitch, e.beat, e.durationBeats])).toEqual([
+      ['C4', 0, 1.75],
+      ['D4', 1.75, 0.25],
+      ['E4', 2, 3],
+      ['F4', 5, 0.875],
+      ['A4', 5, 0.875],
+      ['G4', 7.625, 1],
+    ]);
+    expect(totalBeats).toBe(8.625);
+  });
+
+  it('sums a tie run of dotted and double-dotted notes', () => {
+    const { events } = buildTimeline(voice([
+      { pitch: 'C4', length: '1/2', dotted: 2, tie: 'start' },
+      { pitch: 'C4', length: '1/8', tie: 'stop' },
+    ]));
+    expect(events.map((e) => [e.pitch, e.durationBeats])).toEqual([['C4', 4]]);
   });
 
   it('advances past rests without sounding them', () => {
@@ -197,5 +228,54 @@ describe('buildTimeline', () => {
   it('handles an empty song', () => {
     expect(buildTimeline()).toEqual({ events: [], totalBeats: 0, pitches: [] });
     expect(buildTimeline({ voices: [] }).totalBeats).toBe(0);
+  });
+});
+
+describe('noteBeats / elementBeats with dots', () => {
+  it('scale by 1.5 for a dot and 1.75 for a double dot', () => {
+    expect(noteBeats({ length: '1/4', dotted: true })).toBe(1.5);
+    expect(noteBeats({ length: '1/4', dotted: 2 })).toBe(1.75);
+    expect(noteBeats({ length: '1/4', dotted: 2 }, 2)).toBe(0.875);
+    expect(elementBeats([{ pitch: 'C4', length: '1/2', dotted: 2 }])).toBe(3.5);
+    // Any other truthy dotted is one dot (as it always was), falsy none
+    expect(noteBeats({ length: '1/4', dotted: 'yes' })).toBe(1.5);
+    expect(noteBeats({ length: '1/4', dotted: 0 })).toBe(1);
+  });
+});
+
+// The per-element view of the same rules, for players that walk the elements
+// one by one (Instrument.play; Theremin)
+describe('soundingBeats', () => {
+  it('gives each note its sounding beats: a tie run on its start, 0 on its held notes', () => {
+    expect(soundingBeats([
+      { pitch: 'C4', length: '1/4', tie: 'start' },
+      { pitch: 'C4', length: '1/4', dotted: 2, tie: 'continue' },
+      { pitch: 'C4', length: '1/8', tie: 'stop' },
+      { length: '1/4' },
+      { pitch: 'D4', length: '1/4', dotted: true },
+    ])).toEqual([3.25, 0, 0, null, 1.5]);
+  });
+
+  it('ties chord members each on their own', () => {
+    expect(soundingBeats([
+      [{ pitch: 'C4', length: '1/4', tie: 'start' }, { pitch: 'E4', length: '1/4' }],
+      [{ pitch: 'C4', length: '1/4', tie: 'stop' }, { pitch: 'E4', length: '1/4' }],
+    ])).toEqual([[2, 1], [0, 1]]);
+  });
+
+  it('strikes malformed ties as ordinary notes, and a rest ends an open tie', () => {
+    expect(soundingBeats([
+      { pitch: 'C4', length: '1/4', tie: 'start' },
+      { pitch: 'D4', length: '1/4', tie: 'stop' },
+      { pitch: 'E4', length: '1/4', tie: 'start' },
+      { length: '1/4' },
+      { pitch: 'E4', length: '1/4', tie: 'stop' },
+    ])).toEqual([1, 1, 1, null, 1]);
+  });
+
+  it('counts the same note object met twice as two notes', () => {
+    const note = { pitch: 'C4', length: '1/4' };
+    expect(soundingBeats([note, note])).toEqual([1, 1]);
+    expect(soundingBeats()).toEqual([]);
   });
 });
