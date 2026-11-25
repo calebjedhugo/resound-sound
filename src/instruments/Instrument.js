@@ -81,6 +81,16 @@ class Instrument {
    * Supports pause/resume by tracking position
    * Supports optional offset property on notes for timing adjustments
    *
+   * An element whose offset puts it where the phrase has already been (a
+   * negative offset on the first element, or one reaching back past the
+   * element before) is OVERDUE: it sounds at once, for what is left of its
+   * notes (each note's length less how overdue it is; its note event still
+   * reports it as written; a note with nothing left is neither struck nor
+   * reported), and the elements after it keep
+   * their own times. The phrase ends where its last element's time does,
+   * so a phrase drawn back whole (every element offset by -late ms) ends
+   * `late` ms early: on the grid it was due on.
+   *
    * stop() and pause() don't interrupt a sleep, so a stopped loop can still
    * be asleep on its next note when the next play() starts. Waking to find
    * that newer play(), it returns without playing that note or touching
@@ -156,25 +166,32 @@ class Instrument {
         if (run !== this._run) return; // superseded while asleep
       }
 
-      // Update elapsed time to scheduled play time
-      elapsedTime = playTime;
+      // How far past its time this element is (overdue: it sounds what is
+      // left of it), and the phrase's place: its time, or where it already
+      // is if that is later — the elements after keep their own times
+      const pastMs = Math.max(0, elapsedTime - playTime);
+      elapsedTime = Math.max(elapsedTime, playTime);
 
       // Play the note/chord (without sleeping)
       if (Array.isArray(element)) {
         // CHORD: Play multiple notes simultaneously
-        this.playChordImmediate(element, tempo, basis);
+        this.playChordImmediate(element, tempo, basis, pastMs);
       } else {
         // SINGLE NOTE: Play one note
-        this.playNoteImmediate(element, tempo, basis);
+        this.playNoteImmediate(element, tempo, basis, pastMs);
       }
     }
 
-    // Wait for the last note to finish before resetting state. An empty phrase
-    // has nothing to wait for (and no last entry to read a duration from).
+    // Wait for the last note to finish before resetting state: until its
+    // time's end (an overdue last element ends that much sooner). An empty
+    // phrase has nothing to wait for (and no last entry to read one from).
     const lastScheduled = playSchedule[playSchedule.length - 1];
     if (lastScheduled) {
-      await sleep(lastScheduled.duration);
-      if (run !== this._run) return; // superseded while asleep
+      const endWait = lastScheduled.playTime + lastScheduled.duration - elapsedTime;
+      if (endWait > 0) {
+        await sleep(endWait);
+        if (run !== this._run) return; // superseded while asleep
+      }
     }
 
     // Finished playing - reset state
@@ -222,11 +239,14 @@ class Instrument {
    * @param {Object} note - Note data
    * @param {number} tempo - BPM
    * @param {number} basis - Beat note (4 = quarter note)
+   * @param {number} [pastMs] - how overdue it is (play()): it sounds for
+   *   what is left of it, and not at all if nothing is
    */
-  playNoteImmediate(note, tempo, basis) {
+  playNoteImmediate(note, tempo, basis, pastMs = 0) {
     if (!isPitched(note) || this.disposed) return; // REST, or retired
 
-    const duration = getDuration(note.length, tempo, basis);
+    const duration = getDuration(note.length, tempo, basis) - pastMs;
+    if (duration <= 0) return; // its time is over
     emitNoteEvent(this, note);
 
     // Create and play note (Web Audio schedules it). velocity (0-1) is optional
@@ -239,18 +259,23 @@ class Instrument {
    * @param {Array} notes - Array of note objects
    * @param {number} tempo - BPM
    * @param {number} basis - Beat note (4 = quarter note)
+   * @param {number} [pastMs] - how overdue it is (play()): each member
+   *   sounds for what is left of it, and not at all if nothing is
    */
-  playChordImmediate(notes, tempo, basis) {
+  playChordImmediate(notes, tempo, basis, pastMs = 0) {
     if (this.disposed) return;
-    const durations = notes.map((note) => getDuration(note.length, tempo, basis));
+    const durations = notes.map((note) => getDuration(note.length, tempo, basis) - pastMs);
+    const sounds = notes.map((note, i) => durations[i] > 0);
 
     // Every event is emitted before any note starts, so a listener sees the
     // whole chord as one simultaneity.
-    notes.forEach((note) => emitNoteEvent(this, note));
+    notes.forEach((note, i) => {
+      if (sounds[i]) emitNoteEvent(this, note);
+    });
 
     // Start all notes (Web Audio schedules them)
     notes.forEach((note, i) => {
-      if (isPitched(note)) this.startNote(note.pitch, durations[i], note.velocity);
+      if (sounds[i] && isPitched(note)) this.startNote(note.pitch, durations[i], note.velocity);
     });
   }
 

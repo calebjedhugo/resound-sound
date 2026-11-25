@@ -352,6 +352,38 @@ describe('Theremin.play: dots and ties', () => {
     ]);
   });
 
+  it('a tied run drawn back whole is held as one sound for what is left of it', async () => {
+    const { starts, events } = await played([
+      { pitch: 'C4', length: '1/4', tie: 'start', offset: -200 },
+      { pitch: 'C4', length: '1/4', tie: 'stop', offset: -200 },
+    ]);
+    expect(starts.map(({ pitch, ms, at }) => [pitch, ms, at])).toEqual([['C4', 1800, 0]]);
+    // Its event reports the note as written: the value a listener matches
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ tie: 'start', tiedDuration: 2000, durationBeats: 2 });
+  });
+
+  it('a chord drawn back sounds what is left of each member, a tied one of its run', async () => {
+    const { starts, events } = await played([
+      [
+        { pitch: 'C4', length: '1/4', tie: 'start', offset: -250 },
+        { pitch: 'E4', length: '1/4', offset: -250 },
+      ],
+      [
+        { pitch: 'C4', length: '1/4', tie: 'stop', offset: -250 },
+        { pitch: 'G4', length: '1/4', offset: -250 },
+      ],
+    ]);
+    expect(starts.map(({ pitch, ms, at }) => [pitch, ms, at])).toEqual([
+      ['C4', 1750, 0],
+      ['E4', 750, 0],
+      ['G4', 1000, 750],
+    ]);
+    expect(events.map((event) => [event.pitch, event.durationBeats])).toEqual([
+      ['C4', 2], ['E4', 1], ['G4', 1],
+    ]);
+  });
+
   it("leaves the caller's notes as they were", async () => {
     const data = [
       { pitch: 'C4', length: '1/4', tie: 'start' },

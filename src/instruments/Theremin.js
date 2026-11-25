@@ -622,23 +622,30 @@ class Theremin extends Instrument {
     return ownMs(element, tempo, basis);
   }
 
-  playNoteImmediate(note, tempo, basis) {
+  /**
+   * As Instrument's: an overdue note (pastMs) sounds what is left of it (a
+   * tie, of its run); its event still reports the note as written (its
+   * whole `durationBeats`), the value a listener matches.
+   */
+  playNoteImmediate(note, tempo, basis, pastMs = 0) {
     if (!isPitched(note) || this.disposed) return;
     const ms = this._soundingMs(note, tempo, basis);
     if (ms === 0) return; // held from the note it is tied to
+    if (ms - pastMs <= 0) return; // its time is over
     this._emit(note, ms, tempo);
-    this.startNote(note.pitch, ms, note.velocity);
+    this.startNote(note.pitch, ms - pastMs, note.velocity);
   }
 
-  playChordImmediate(notes, tempo, basis) {
+  playChordImmediate(notes, tempo, basis, pastMs = 0) {
     if (this.disposed) return;
     const durations = notes.map((note) => (isPitched(note) ? this._soundingMs(note, tempo, basis) : 0));
+    const sounds = durations.map((ms) => ms > 0 && ms - pastMs > 0);
     // Every event before any note starts: a listener hears one simultaneity
     notes.forEach((note, i) => {
-      if (durations[i] > 0) this._emit(note, durations[i], tempo);
+      if (sounds[i]) this._emit(note, durations[i], tempo);
     });
     notes.forEach((note, i) => {
-      if (durations[i] > 0) this.startNote(note.pitch, durations[i], note.velocity);
+      if (sounds[i]) this.startNote(note.pitch, durations[i] - pastMs, note.velocity);
     });
   }
 

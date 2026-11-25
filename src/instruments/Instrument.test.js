@@ -370,4 +370,100 @@ describe('Instrument', () => {
       expect(order).toEqual(['emit:C/4', 'emit:E/4', 'start:C/4', 'start:E/4']);
     });
   });
+
+  describe('overdue elements (offsets reaching back before the phrase is)', () => {
+    /** Play a phrase to its end at 120 bpm: each start's time, and when it ended. */
+    async function played(data) {
+      const inst = new Recorder();
+      const t0 = Date.now();
+      const start = inst.startNote.bind(inst);
+      inst.startNote = (pitch, duration, velocity) => {
+        start(pitch, duration, velocity);
+        inst.started[inst.started.length - 1].at = Date.now() - t0;
+      };
+      const events = [];
+      inst.noteCallback = (event) => events.push(event.pitch);
+      let endedAt = null;
+      const done = inst.play({ data, tempo: 120, basis: 4 }).then(() => {
+        endedAt = Date.now() - t0;
+      });
+      await jest.advanceTimersByTimeAsync(10000);
+      await done;
+      return {
+        starts: inst.started.map(({ pitch, duration, at }) => [pitch, duration, at]),
+        events,
+        endedAt,
+        inst,
+      };
+    }
+
+    it('a phrase drawn back whole sounds what is left of its first note and ends that much sooner', async () => {
+      const { starts, endedAt } = await played(
+        THREE_NOTES.map((note) => ({ ...note, offset: -100 })),
+      );
+      expect(starts).toEqual([
+        ['C/4', 400, 0],
+        ['D/4', 500, 400],
+        ['E/4', 500, 900],
+      ]);
+      expect(endedAt).toBe(1400);
+    });
+
+    it('a one-note phrase drawn back ends on the time it was due to (nothing after it to draw back)', async () => {
+      const { starts, endedAt, inst } = await played([{ pitch: 'B/5', length: '1/1', offset: -300 }]);
+      expect(starts).toEqual([['B/5', 1700, 0]]);
+      expect(endedAt).toBe(1700);
+      expect(inst.playbackState.isPlaying).toBe(false);
+    });
+
+    it('a chord drawn back shortens every member by as much', async () => {
+      const { starts, endedAt } = await played([
+        [
+          { pitch: 'C/4', length: '1/2', offset: -100 },
+          { pitch: 'E/4', length: '1/4', offset: -100 },
+        ],
+      ]);
+      expect(starts).toEqual([
+        ['C/4', 900, 0],
+        ['E/4', 400, 0],
+      ]);
+      expect(endedAt).toBe(400); // a chord lasts its shortest member
+    });
+
+    it('the elements after an overdue one keep their own times', async () => {
+      const { starts, endedAt } = await played([
+        { pitch: 'C/4', length: '1/4', offset: -100 },
+        { pitch: 'D/4', length: '1/4' },
+      ]);
+      expect(starts).toEqual([
+        ['C/4', 400, 0],
+        ['D/4', 500, 500],
+      ]);
+      expect(endedAt).toBe(1000);
+    });
+
+    it('a note overdue by its whole length is neither struck nor reported', async () => {
+      const { starts, events, endedAt } = await played([
+        { pitch: 'C/4', length: '1/4', offset: -600 },
+        { pitch: 'D/4', length: '1/4' },
+      ]);
+      expect(starts).toEqual([['D/4', 500, 500]]);
+      expect(events).toEqual(['D/4']);
+      expect(endedAt).toBe(1000);
+    });
+
+    it('offsets that reach nothing overdue time the phrase as before', async () => {
+      const { starts, endedAt } = await played([
+        { pitch: 'C/4', length: '1/4' },
+        { pitch: 'D/4', length: '1/4', offset: -100 },
+        { pitch: 'E/4', length: '1/4', offset: -100 },
+      ]);
+      expect(starts).toEqual([
+        ['C/4', 500, 0],
+        ['D/4', 500, 400],
+        ['E/4', 500, 900],
+      ]);
+      expect(endedAt).toBe(1400);
+    });
+  });
 });
