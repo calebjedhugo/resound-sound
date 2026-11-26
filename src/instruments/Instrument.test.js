@@ -409,6 +409,46 @@ describe('Instrument', () => {
       expect(endedAt).toBe(1400);
     });
 
+    it('each event is stamped when its note was written to start, so the rhythm heard is as written', async () => {
+      const inst = new Recorder();
+      const t0 = Date.now();
+      const stamps = [];
+      inst.noteCallback = (event) => stamps.push([event.pitch, event.timestamp - t0]);
+      const done = inst.play({
+        data: THREE_NOTES.map((note) => ({ ...note, offset: -100 })),
+        tempo: 120,
+        basis: 4,
+      });
+      await jest.advanceTimersByTimeAsync(10000);
+      await done;
+      // The first sounded at once, 100 ms into itself: stamped 100 ms back
+      expect(stamps).toEqual([
+        ['C/4', -100],
+        ['D/4', 400],
+        ['E/4', 900],
+      ]);
+    });
+
+    it('a chord drawn back stamps every member when it was written to start', async () => {
+      const inst = new Recorder();
+      const t0 = Date.now();
+      const stamps = [];
+      inst.noteCallback = (event) => stamps.push(event.timestamp - t0);
+      const done = inst.play({
+        data: [
+          [
+            { pitch: 'C/4', length: '1/2', offset: -100 },
+            { pitch: 'E/4', length: '1/4', offset: -100 },
+          ],
+        ],
+        tempo: 120,
+        basis: 4,
+      });
+      await jest.advanceTimersByTimeAsync(10000);
+      await done;
+      expect(stamps).toEqual([-100, -100]);
+    });
+
     it('a one-note phrase drawn back ends on the time it was due to (nothing after it to draw back)', async () => {
       const { starts, endedAt, inst } = await played([{ pitch: 'B/5', length: '1/1', offset: -300 }]);
       expect(starts).toEqual([['B/5', 1700, 0]]);

@@ -296,6 +296,29 @@ describe('Theremin.play: dots and ties', () => {
     ]);
   });
 
+  it('an overdue note is stamped when it was written to start (the rhythm heard is as written)', async () => {
+    const theremin = new Theremin('t');
+    const t0 = Date.now();
+    const stamps = [];
+    theremin.noteCallback = (event) => stamps.push([event.pitch, event.timestamp - t0]);
+    const done = theremin.play({
+      data: [
+        { pitch: 'C4', length: '1/4', offset: -300 },
+        { pitch: 'D4', length: '1/4', offset: -300 },
+      ],
+      tempo: 60,
+      basis: 4,
+    });
+    await jest.advanceTimersByTimeAsync(20000);
+    await done;
+    // C4 sounded at once, 300 ms into itself: stamped 300 ms back; D4 a
+    // quarter (1 s) after it, as written
+    expect(stamps).toEqual([
+      ['C4', -300],
+      ['D4', 700],
+    ]);
+  });
+
   it('holds a tied note as one sound: struck once, for the whole run', async () => {
     const { starts, events } = await played([
       { pitch: 'C4', length: '1/4', tie: 'start' },

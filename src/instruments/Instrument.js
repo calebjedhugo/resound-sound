@@ -20,13 +20,16 @@ function isPitched(note) {
  * spatial audio). No-op when nobody is listening or the note is a rest.
  * @param {Instrument} instrument
  * @param {Object} note
+ * @param {number} [pastMs] - how overdue it is: its `timestamp` is when it
+ *   was written to start (now - pastMs), so a listener hears the phrase's
+ *   rhythm as written even when its first note sounded late and shortened
  */
-function emitNoteEvent(instrument, note) {
+function emitNoteEvent(instrument, note, pastMs = 0) {
   if (!instrument.noteCallback || !isPitched(note)) return;
   instrument.noteCallback({
     pitch: note.pitch,
     length: note.length,
-    timestamp: Date.now(),
+    timestamp: Date.now() - pastMs,
     source: instrument.id,
     sourcePosition: instrument.sourcePosition,
   });
@@ -247,7 +250,7 @@ class Instrument {
 
     const duration = getDuration(note.length, tempo, basis) - pastMs;
     if (duration <= 0) return; // its time is over
-    emitNoteEvent(this, note);
+    emitNoteEvent(this, note, pastMs);
 
     // Create and play note (Web Audio schedules it). velocity (0-1) is optional
     // and only meaningful to instruments that model it (e.g. Piano).
@@ -270,7 +273,7 @@ class Instrument {
     // Every event is emitted before any note starts, so a listener sees the
     // whole chord as one simultaneity.
     notes.forEach((note, i) => {
-      if (sounds[i]) emitNoteEvent(this, note);
+      if (sounds[i]) emitNoteEvent(this, note, pastMs);
     });
 
     // Start all notes (Web Audio schedules them)
